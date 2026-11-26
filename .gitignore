@@ -1,0 +1,71 @@
+# ==============================================================================
+# Home directory ($HOME == workspace) dotfiles, dotdirs & internal agent files
+# ==============================================================================
+/.agents/
+/.android/
+/.bash_history
+/.bash_logout
+/.bashrc
+/.cache/
+/.config/
+/.corepack/
+/.dbus/
+/.gemini/
+/.gitconfig
+/.gnupg/
+/.gradle/
+/.lesshst
+/.local/
+/.mozilla/
+/.node_repl_history
+/.npm/
+/.npmrc
+/.nvm/
+/.pki/
+/.profile
+/.pyenv/
+/.python_history
+/.ssh/
+/.v8flags.*
+/.wget-hsts
+/.Xauthority
+
+# Internal teamwork & QA orchestration metadata (never push to public repo)
+/PROJECT.md
+/TEST_INFRA.md
+/TEST_READY.md
+
+# ==============================================================================
+# Next.js, Node.js, TypeScript & Build Outputs
+# ==============================================================================
+node_modules/
+/.next/
+/out/
+/build/
+/.vercel/
+/.turbo/
+next-env.d.ts
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==============================================================================
+# Runtime Persistence & Secrets
+# ==============================================================================
+/data/
+/.data/
+.env
+.env.*
+!.env.example
+
+# ==============================================================================
+# Testing & OS Artifacts
+# ==============================================================================
+/coverage/
+/playwright-report/
+/test-results/
+/blob-report/
+.DS_Store
+Thumbs.db

@@ -5,19 +5,39 @@ import {
   PDFDocument,
   clip,
   closePath,
+  degrees,
   endPath,
   lineTo,
   moveTo,
   popGraphicsState,
   pushGraphicsState,
   rgb,
+  translate,
   type PDFFont,
   type PDFImage,
   type PDFPage,
   type RGB,
 } from 'pdf-lib';
 import sharp from 'sharp';
-import { formatAgeYears } from '@/lib/polish/inflection';
+import {
+  FORMAT_LAYOUT_SPECS,
+  MAX_BLEED_MM,
+  MAX_SPINE_MM,
+  MIN_BLEED_MM,
+  MIN_SPINE_MM,
+  PDF_LAYOUT_MODES,
+  POLISH_ORPHANS,
+  PT_PER_MM,
+  computeCropMarkSegments,
+  computeDefaultSpineMm,
+  computePrepressBoxes,
+  getFormatLayoutSpec,
+  isPdfEncodableCodePoint,
+  mmToPoints,
+  type PdfBoxRect,
+  type PdfLayoutMode,
+} from '@/lib/pdf/layout-spec';
+import { declinePolishName, formatAgeYears } from '@/lib/polish/inflection';
 import { ART_STYLE_META } from '@/lib/polish/prompts';
 import { detectImageMime, resolveSafeChildPath } from '@/lib/storage/security';
 import { readStoryAsset } from '@/lib/storage/store';
@@ -36,18 +56,33 @@ export interface PdfAssetResolver {
   readStoryAsset(storyId: string, filename: string): Promise<Buffer | null>;
 }
 
+export interface PdfGenerationOptions {
+  /** Print bleed margin in millimeters on each edge (0..10, default 0). Standard POD bleed is 3 mm. */
+  bleedMm?: number;
+  /** Draws hairline corner crop marks strictly outside BleedBox in an expanded slug margin. */
+  cropMarks?: boolean;
+  /** Inserts decorative editorial endpaper pages so total pages are divisible by 4 (combined & interior modes). */
+  padToMultipleOf4?: boolean;
+  /** POD layout mode: 'combined' (default), 'interior' (dedication+pages+endpapers), or 'cover-wrap' (back|spine|front spread). */
+  layoutMode?: PdfLayoutMode;
+  /** Spine width in mm for 'cover-wrap' mode (3..50 mm; defaults to page-count formula >= 6 mm). */
+  spineMm?: number;
+}
+
+export { PT_PER_MM, mmToPoints, type PdfLayoutMode };
+
 export const PDF_DIMENSIONS: Readonly<
   Record<BookFormat, { width: number; height: number; label: string }>
 > = {
   square: {
-    width: 595.28, // 210 mm (21 x 21 cm)
-    height: 595.28,
-    label: 'Kwadrat 21×21 cm',
+    width: FORMAT_LAYOUT_SPECS.square.trimWidthPt,
+    height: FORMAT_LAYOUT_SPECS.square.trimHeightPt,
+    label: FORMAT_LAYOUT_SPECS.square.label,
   },
   'a4-landscape': {
-    width: 841.89, // 297 mm
-    height: 595.28, // 210 mm
-    label: 'A4 poziomy',
+    width: FORMAT_LAYOUT_SPECS['a4-landscape'].trimWidthPt,
+    height: FORMAT_LAYOUT_SPECS['a4-landscape'].trimHeightPt,
+    label: FORMAT_LAYOUT_SPECS['a4-landscape'].label,
   },
 };
 
@@ -136,32 +171,23 @@ async function embedPolishFonts(pdfDoc: PDFDocument): Promise<EmbeddedFonts> {
 // Safe Text Sanitization & Polish Orphan-Safe Wrapping
 // =============================================================================
 
-const POLISH_ORPHANS = new Set([
-  'a',
-  'i',
-  'o',
-  'u',
-  'w',
-  'z',
-  'A',
-  'I',
-  'O',
-  'U',
-  'W',
-  'Z',
-]);
-
 /**
  * Cleans unsupported control characters / emojis so embedded TTF fonts never throw
- * while preserving full Polish diacritics, smart quotes, dashes, and ellipsis.
+ * or emit `.notdef` tofu boxes, while preserving full Polish diacritics, smart quotes,
+ * dashes, and ellipsis.
  */
 function sanitizePdfText(raw: string, font: PDFFont): string {
   const normalized = raw
     .normalize('NFC')
     .replace(/\r\n?/g, '\n')
-    .replace(/[\u200B-\u200F\uFEFF]/g, '')
+    .replace(/[\u200B-\u200F\uFEFF\uFE0E\uFE0F]/g, '')
     .replace(/\u00A0/g, ' ')
     .replace(/\t/g, ' ');
+
+  const fontWithEmbedder = font as unknown as {
+    embedder?: { font?: { hasGlyphForCodePoint?: (codePoint: number) => boolean } };
+  };
+  const hasGlyphCheck = fontWithEmbedder.embedder?.font?.hasGlyphForCodePoint;
 
   let out = '';
   for (const ch of normalized) {
@@ -171,6 +197,15 @@ function sanitizePdfText(raw: string, font: PDFFont): string {
     }
     const code = ch.codePointAt(0) ?? 0;
     if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) {
+      continue;
+    }
+    if (!isPdfEncodableCodePoint(code)) {
+      continue;
+    }
+    if (
+      typeof hasGlyphCheck === 'function' &&
+      !hasGlyphCheck.call(fontWithEmbedder.embedder?.font, code)
+    ) {
       continue;
     }
     try {
@@ -302,7 +337,7 @@ function drawCenteredText(
   size: number,
   color: RGB,
   areaX = 0,
-  areaWidth = page.getWidth(),
+  areaWidth = page.getTrimBox().width,
 ): void {
   const safe = sanitizePdfText(text, font);
   const w = font.widthOfTextAtSize(safe, size);
@@ -470,9 +505,7 @@ function drawPlaceholderArtworkBox(
   );
 }
 
-function drawEditorialBorder(page: PDFPage, margin = 20): void {
-  const w = page.getWidth();
-  const h = page.getHeight();
+function drawEditorialBorder(page: PDFPage, w: number, h: number, margin = 20): void {
   page.drawRectangle({
     x: 0,
     y: 0,
@@ -509,16 +542,17 @@ function renderFrontCover(
   coverImage: PDFImage | null,
   format: BookFormat,
 ): void {
-  const w = page.getWidth();
-  const h = page.getHeight();
-  drawEditorialBorder(page, 18);
+  const spec = getFormatLayoutSpec(format);
+  const w = spec.trimWidthPt;
+  const h = spec.trimHeightPt;
+  drawEditorialBorder(page, w, h, 18);
 
   if (format === 'a4-landscape') {
     // Left half artwork, right half editorial cover title panel
     const artX = 36;
     const artY = 38;
-    const artW = w * 0.52;
-    const artH = h - 76;
+    const artW = spec.coverArt.widthPt;
+    const artH = spec.coverArt.heightPt;
 
     page.drawRectangle({
       x: artX - 6,
@@ -628,11 +662,13 @@ function renderFrontCover(
     fonts.sansSemiBold,
     8.5,
     COLOR_TERRACOTTA,
+    0,
+    w,
   );
 
-  const artMarginX = 62;
-  const artW = w - artMarginX * 2;
-  const artH = 304;
+  const artW = spec.coverArt.widthPt;
+  const artH = spec.coverArt.heightPt;
+  const artMarginX = (w - artW) / 2;
   const artY = h - 66 - artH;
 
   page.drawRectangle({
@@ -662,14 +698,14 @@ function renderFrontCover(
   const titleLines = wrapPolishText(story.title, fonts.serifBold, 23, w - 96, 3);
   let cursorY = artY - 36;
   for (const line of titleLines) {
-    drawCenteredText(page, line, cursorY, fonts.serifBold, 23, COLOR_INK);
+    drawCenteredText(page, line, cursorY, fonts.serifBold, 23, COLOR_INK, 0, w);
     cursorY -= 28;
   }
 
   const subLines = wrapPolishText(story.subtitle, fonts.serifItalic, 12, w - 110, 2);
   cursorY -= 2;
   for (const line of subLines) {
-    drawCenteredText(page, line, cursorY, fonts.serifItalic, 12, COLOR_INK_MUTED);
+    drawCenteredText(page, line, cursorY, fonts.serifItalic, 12, COLOR_INK_MUTED, 0, w);
     cursorY -= 17;
   }
 
@@ -680,6 +716,8 @@ function renderFrontCover(
     fonts.sansSemiBold,
     9.5,
     COLOR_SAGE,
+    0,
+    w,
   );
 }
 
@@ -690,12 +728,13 @@ function renderDedicationPage(
   childPhoto: PDFImage | null,
   format: BookFormat,
 ): void {
-  const w = page.getWidth();
-  const h = page.getHeight();
-  drawEditorialBorder(page, 24);
+  const spec = getFormatLayoutSpec(format);
+  const w = spec.trimWidthPt;
+  const h = spec.trimHeightPt;
+  drawEditorialBorder(page, w, h, 24);
 
   const isLandscape = format === 'a4-landscape';
-  const photoSize = isLandscape ? 210 : 186;
+  const photoSize = spec.dedicationPortrait.widthPt;
   const photoX = (w - photoSize) / 2;
   const photoY = h - 94 - photoSize;
 
@@ -706,6 +745,8 @@ function renderDedicationPage(
     fonts.sansSemiBold,
     9.5,
     COLOR_TERRACOTTA,
+    0,
+    w,
   );
 
   // Double linen photo frame
@@ -761,13 +802,18 @@ function renderDedicationPage(
 
   let cursorY = dividerY - 28;
   for (const line of dedicationLines) {
-    drawCenteredText(page, line, cursorY, fonts.serifItalic, 14, COLOR_INK);
+    drawCenteredText(page, line, cursorY, fonts.serifItalic, 14, COLOR_INK, 0, w);
     cursorY -= 22;
   }
 
-  const fromLabel = story.input.dedicationFrom
-    ? `Z miłością — ${story.input.dedicationFrom}`
-    : `Dla ${story.input.childName} • ${formatAgeYears(story.input.childAge)}`;
+  const childNameGenitive = declinePolishName(
+    story.input.childName,
+    story.input.gender,
+  ).genitive;
+  const trimmedFrom = story.input.dedicationFrom?.trim();
+  const fromLabel = trimmedFrom
+    ? `Z miłością — ${trimmedFrom}`
+    : `Dla ${childNameGenitive} • ${formatAgeYears(story.input.childAge)}`;
 
   drawCenteredText(
     page,
@@ -776,6 +822,8 @@ function renderDedicationPage(
     fonts.sansSemiBold,
     10.5,
     COLOR_TERRACOTTA,
+    0,
+    w,
   );
 }
 
@@ -787,16 +835,17 @@ function renderStoryPage(
   artwork: PDFImage | null,
   format: BookFormat,
 ): void {
-  const w = page.getWidth();
-  const h = page.getHeight();
-  drawEditorialBorder(page, 18);
+  const spec = getFormatLayoutSpec(format);
+  const w = spec.trimWidthPt;
+  const h = spec.trimHeightPt;
+  drawEditorialBorder(page, w, h, 18);
 
   if (format === 'a4-landscape') {
     // Left half illustration, right half polished book typography
     const artX = 36;
     const artY = 44;
-    const artW = 432;
-    const artH = h - 88;
+    const artW = spec.pageArt.widthPt;
+    const artH = spec.pageArt.heightPt;
 
     page.drawRectangle({
       x: artX - 6,
@@ -905,9 +954,9 @@ function renderStoryPage(
   }
 
   // Square 21×21 cm layout: top illustration + bottom chapter heading & prose
-  const artX = 42;
-  const artW = w - 84;
-  const artH = 312;
+  const artW = spec.pageArt.widthPt;
+  const artH = spec.pageArt.heightPt;
+  const artX = (w - artW) / 2;
   const artY = h - 38 - artH;
 
   page.drawRectangle({
@@ -945,7 +994,7 @@ function renderStoryPage(
   );
   let cursorY = artY - 26;
   for (const line of titleLines) {
-    drawCenteredText(page, line, cursorY, fonts.serifBold, 14.5, COLOR_TERRACOTTA);
+    drawCenteredText(page, line, cursorY, fonts.serifBold, 14.5, COLOR_TERRACOTTA, 0, w);
     cursorY -= 19;
   }
 
@@ -981,7 +1030,61 @@ function renderStoryPage(
     fonts.sansRegular,
     9,
     COLOR_INK_MUTED,
+    0,
+    w,
   );
+}
+
+function renderEndpaperPage(
+  page: PDFPage,
+  story: StoryRecord,
+  fonts: EmbeddedFonts,
+  format: BookFormat,
+): void {
+  const spec = getFormatLayoutSpec(format);
+  const w = spec.trimWidthPt;
+  const h = spec.trimHeightPt;
+  drawEditorialBorder(page, w, h, 24);
+
+  const childNameGenitive = declinePolishName(
+    story.input.childName,
+    story.input.gender,
+  ).genitive;
+
+  drawCenteredText(
+    page,
+    'NOTATKI I RYSUNKI',
+    h - 76,
+    fonts.sansSemiBold,
+    9,
+    COLOR_TERRACOTTA,
+    0,
+    w,
+  );
+  drawCenteredText(
+    page,
+    `Miejsce na wspomnienia z czytania bajki dla ${childNameGenitive}`,
+    h - 96,
+    fonts.serifItalic,
+    11,
+    COLOR_INK_MUTED,
+    0,
+    w,
+  );
+
+  // Subtle horizontal dotted-style writing rules
+  const lineStartX = 64;
+  const lineEndX = w - 64;
+  const startY = h - 146;
+  const endY = 74;
+  for (let y = startY; y >= endY; y -= 32) {
+    page.drawLine({
+      start: { x: lineStartX, y },
+      end: { x: lineEndX, y },
+      thickness: 0.45,
+      color: COLOR_RULE,
+    });
+  }
 }
 
 function renderBackCover(
@@ -990,8 +1093,9 @@ function renderBackCover(
   fonts: EmbeddedFonts,
   format: BookFormat,
 ): void {
-  const w = page.getWidth();
-  const h = page.getHeight();
+  const spec = getFormatLayoutSpec(format);
+  const w = spec.trimWidthPt;
+  const h = spec.trimHeightPt;
 
   page.drawRectangle({ x: 0, y: 0, width: w, height: h, color: COLOR_PAPER_ALT });
   page.drawRectangle({
@@ -1019,12 +1123,14 @@ function renderBackCover(
     fonts.sansSemiBold,
     9.5,
     COLOR_TERRACOTTA,
+    0,
+    w,
   );
 
   const titleLines = wrapPolishText(story.title, fonts.serifBold, 20, w - 140, 3);
   let cursorY = h - 128;
   for (const line of titleLines) {
-    drawCenteredText(page, line, cursorY, fonts.serifBold, 20, COLOR_INK);
+    drawCenteredText(page, line, cursorY, fonts.serifBold, 20, COLOR_INK, 0, w);
     cursorY -= 26;
   }
 
@@ -1046,7 +1152,7 @@ function renderBackCover(
 
   cursorY -= 26;
   for (const line of blurbLines) {
-    drawCenteredText(page, line, cursorY, fonts.serifRegular, 13, COLOR_INK);
+    drawCenteredText(page, line, cursorY, fonts.serifRegular, 13, COLOR_INK, 0, w);
     cursorY -= 21;
   }
 
@@ -1079,7 +1185,7 @@ function renderBackCover(
   );
   drawCenteredText(
     page,
-    `Styl: ${styleLabel} • Format: ${PDF_DIMENSIONS[format].label}`,
+    `Styl: ${styleLabel} • Format: ${spec.label}`,
     colophonY + 29,
     fonts.sansRegular,
     8.5,
@@ -1099,6 +1205,70 @@ function renderBackCover(
   );
 }
 
+function renderSpinePanel(
+  page: PDFPage,
+  story: StoryRecord,
+  fonts: EmbeddedFonts,
+  spinePt: number,
+  panelH: number,
+): void {
+  page.drawRectangle({
+    x: 0,
+    y: 0,
+    width: spinePt,
+    height: panelH,
+    color: COLOR_PAPER_ALT,
+  });
+
+  const ruleInset = Math.min(4, spinePt * 0.2);
+  if (spinePt - ruleInset * 2 > 1) {
+    page.drawLine({
+      start: { x: ruleInset, y: panelH - 28 },
+      end: { x: spinePt - ruleInset, y: panelH - 28 },
+      thickness: 0.7,
+      color: COLOR_GOLD,
+    });
+    page.drawLine({
+      start: { x: ruleInset, y: 28 },
+      end: { x: spinePt - ruleInset, y: 28 },
+      thickness: 0.7,
+      color: COLOR_GOLD,
+    });
+  }
+
+  const fontSize = Math.min(10.5, Math.max(5.5, spinePt * 0.48));
+  const maxTextLen = Math.max(60, panelH - 110);
+  let spineTitle = sanitizePdfText(story.title, fonts.serifBold).replace(/\s+/g, ' ').trim();
+  if (spineTitle.length === 0) {
+    return;
+  }
+
+  if (fonts.serifBold.widthOfTextAtSize(spineTitle, fontSize) > maxTextLen) {
+    const ellipsis = '…';
+    while (
+      spineTitle.length > 1 &&
+      fonts.serifBold.widthOfTextAtSize(`${spineTitle}${ellipsis}`, fontSize) > maxTextLen
+    ) {
+      spineTitle = spineTitle.slice(0, -1).trimEnd();
+    }
+    spineTitle = `${spineTitle}${ellipsis}`;
+  }
+
+  const textW = fonts.serifBold.widthOfTextAtSize(spineTitle, fontSize);
+  // Under -90° rotation, text runs downward (-y) for textW and ascent extends right (+x) ~0.7*fontSize.
+  const x = (spinePt - fontSize * 0.7) / 2;
+  const y = (panelH + textW) / 2;
+
+  page.drawText(spineTitle, {
+    x,
+    y,
+    font: fonts.serifBold,
+    size: fontSize,
+    color: COLOR_INK,
+    rotate: degrees(-90),
+  });
+}
+
 // =============================================================================
 // Main Export Entrypoint
 // =============================================================================
@@ -1110,48 +1280,244 @@ const defaultAssetResolver: PdfAssetResolver = {
   },
 };
 
+function drawCropMarks(
+  page: PDFPage,
+  trimW: number,
+  trimH: number,
+  bleedPt: number,
+  slugPt: number,
+  foldOffsetsX: readonly number[] = [],
+): void {
+  if (slugPt <= 0) {
+    return;
+  }
+  const segments = computeCropMarkSegments(trimW, trimH, bleedPt, slugPt, foldOffsetsX);
+  for (const seg of segments) {
+    page.drawLine({
+      start: { x: seg.x1, y: seg.y1 },
+      end: { x: seg.x2, y: seg.y2 },
+      thickness: 0.35,
+      color: COLOR_INK,
+      ...(seg.kind === 'fold' ? { dashArray: [2, 2] } : {}),
+    });
+  }
+}
+
+function addFramedBookPage(
+  pdfDoc: PDFDocument,
+  trimW: number,
+  trimH: number,
+  bleedPt: number,
+  slugPt: number,
+  cropMarks: boolean,
+  bleedBackground: RGB | ((page: PDFPage, bleedBox: PdfBoxRect) => void),
+  renderFn: (page: PDFPage) => void,
+  foldOffsetsX: readonly number[] = [],
+): PDFPage {
+  const { mediaBox, bleedBox, trimBox, offsetPt } = computePrepressBoxes(
+    trimW,
+    trimH,
+    bleedPt,
+    slugPt,
+  );
+
+  const page = pdfDoc.addPage([mediaBox.width, mediaBox.height]);
+  page.setMediaBox(mediaBox.x, mediaBox.y, mediaBox.width, mediaBox.height);
+  page.setBleedBox(bleedBox.x, bleedBox.y, bleedBox.width, bleedBox.height);
+  page.setTrimBox(trimBox.x, trimBox.y, trimBox.width, trimBox.height);
+
+  // Fill strictly within BleedBox so the slug area outside BleedBox stays white for crisp crop marks
+  if (bleedPt > 0 || slugPt > 0) {
+    if (typeof bleedBackground === 'function') {
+      bleedBackground(page, bleedBox);
+    } else {
+      page.drawRectangle({
+        x: bleedBox.x,
+        y: bleedBox.y,
+        width: bleedBox.width,
+        height: bleedBox.height,
+        color: bleedBackground,
+      });
+    }
+  }
+
+  // Translate coordinate system into the TrimBox origin so all page layouts render identically
+  if (offsetPt > 0) {
+    page.pushOperators(pushGraphicsState(), translate(offsetPt, offsetPt));
+    renderFn(page);
+    page.pushOperators(popGraphicsState());
+  } else {
+    renderFn(page);
+  }
+
+  if (cropMarks && slugPt > 0) {
+    drawCropMarks(page, trimW, trimH, bleedPt, slugPt, foldOffsetsX);
+  }
+
+  return page;
+}
+
 export async function generateStoryPdf(
   story: StoryRecord,
   format: BookFormat,
   resolver: PdfAssetResolver = defaultAssetResolver,
+  options: PdfGenerationOptions = {},
 ): Promise<Uint8Array> {
-  const dims = PDF_DIMENSIONS[format];
-  if (!dims) {
+  const spec = getFormatLayoutSpec(format);
+  if (!spec) {
     throw new Error(`Nieobsługiwany format PDF: ${String(format)}`);
   }
+
+  const layoutMode: PdfLayoutMode = options.layoutMode ?? 'combined';
+  if (!PDF_LAYOUT_MODES.includes(layoutMode)) {
+    throw new Error(
+      `Nieobsługiwany tryb układu PDF: ${String(layoutMode)}. Dozwolone: ${PDF_LAYOUT_MODES.join(', ')}.`,
+    );
+  }
+
+  const rawBleedMm = options.bleedMm ?? 0;
+  if (!Number.isFinite(rawBleedMm) || rawBleedMm < MIN_BLEED_MM || rawBleedMm > MAX_BLEED_MM) {
+    throw new Error(
+      `Parametr bleedMm musi mieścić się w zakresie ${MIN_BLEED_MM}–${MAX_BLEED_MM} mm.`,
+    );
+  }
+
+  if (options.spineMm !== undefined) {
+    if (
+      !Number.isFinite(options.spineMm) ||
+      options.spineMm < MIN_SPINE_MM ||
+      options.spineMm > MAX_SPINE_MM
+    ) {
+      throw new Error(
+        `Parametr spineMm musi mieścić się w zakresie ${MIN_SPINE_MM}–${MAX_SPINE_MM} mm.`,
+      );
+    }
+  }
+
+  const bleedPt = rawBleedMm > 0 ? mmToPoints(rawBleedMm) : 0;
+  const cropMarks = Boolean(options.cropMarks);
+  const slugPt = cropMarks ? mmToPoints(spec.cropMarkSlugMm) : 0;
+  const padToMultipleOf4 = Boolean(options.padToMultipleOf4);
 
   const pdfDoc = await PDFDocument.create();
   pdfDoc.registerFontkit(fontkit);
 
+  const childNameGenitive = declinePolishName(
+    story.input.childName,
+    story.input.gender,
+  ).genitive;
+
   pdfDoc.setTitle(story.title);
   pdfDoc.setAuthor('BajkoKreator');
-  pdfDoc.setSubject(`Spersonalizowana bajka dla ${story.input.childName}`);
+  pdfDoc.setSubject(`Spersonalizowana bajka dla ${childNameGenitive}`);
   pdfDoc.setCreator('BajkoKreator — Pracownia Książek dla Dzieci');
   pdfDoc.setProducer('pdf-lib + @pdf-lib/fontkit');
 
   const fonts = await embedPolishFonts(pdfDoc);
+  const panelW = spec.trimWidthPt;
+  const panelH = spec.trimHeightPt;
 
-  // 1. Front Cover (Page 1)
-  const coverBuf = await resolveImageBuffer(
-    story.id,
-    story.coverFilename,
-    story.demoCoverPath,
-    resolver,
-  );
-  const coverImage = coverBuf ? await embedBufferAsPdfImage(pdfDoc, coverBuf) : null;
-  const frontCoverPage = pdfDoc.addPage([dims.width, dims.height]);
-  renderFrontCover(frontCoverPage, story, fonts, coverImage, format);
+  if (layoutMode === 'cover-wrap') {
+    const spineMm = options.spineMm ?? computeDefaultSpineMm(story.pages.length);
+    const spinePt = mmToPoints(spineMm);
+    const totalTrimW = panelW * 2 + spinePt;
+    const totalTrimH = panelH;
 
-  // 2. Dedication Page with Framed Child Photo (Page 2)
+    const coverBuf = await resolveImageBuffer(
+      story.id,
+      story.coverFilename,
+      story.demoCoverPath,
+      resolver,
+    );
+    const coverImage = coverBuf ? await embedBufferAsPdfImage(pdfDoc, coverBuf) : null;
+
+    addFramedBookPage(
+      pdfDoc,
+      totalTrimW,
+      totalTrimH,
+      bleedPt,
+      slugPt,
+      cropMarks,
+      (page, bleedBox) => {
+        const leftWidth = bleedPt + panelW + spinePt;
+        page.drawRectangle({
+          x: bleedBox.x,
+          y: bleedBox.y,
+          width: leftWidth,
+          height: bleedBox.height,
+          color: COLOR_PAPER_ALT,
+        });
+        page.drawRectangle({
+          x: bleedBox.x + leftWidth,
+          y: bleedBox.y,
+          width: bleedBox.width - leftWidth,
+          height: bleedBox.height,
+          color: COLOR_PAPER,
+        });
+      },
+      (page) => {
+        // Left panel: Back Cover [0..panelW]
+        renderBackCover(page, story, fonts, format);
+
+        // Center panel: Spine [panelW..panelW+spinePt]
+        page.pushOperators(pushGraphicsState(), translate(panelW, 0));
+        renderSpinePanel(page, story, fonts, spinePt, panelH);
+        page.pushOperators(popGraphicsState());
+
+        // Right panel: Front Cover [panelW+spinePt..2*panelW+spinePt]
+        page.pushOperators(pushGraphicsState(), translate(panelW + spinePt, 0));
+        renderFrontCover(page, story, fonts, coverImage, format);
+        page.pushOperators(popGraphicsState());
+      },
+      [panelW, panelW + spinePt],
+    );
+
+    return pdfDoc.save();
+  }
+
+  // 1. Front Cover (combined mode only)
+  if (layoutMode === 'combined') {
+    const coverBuf = await resolveImageBuffer(
+      story.id,
+      story.coverFilename,
+      story.demoCoverPath,
+      resolver,
+    );
+    const coverImage = coverBuf ? await embedBufferAsPdfImage(pdfDoc, coverBuf) : null;
+    addFramedBookPage(
+      pdfDoc,
+      panelW,
+      panelH,
+      bleedPt,
+      slugPt,
+      cropMarks,
+      COLOR_PAPER,
+      (page) => {
+        renderFrontCover(page, story, fonts, coverImage, format);
+      },
+    );
+  }
+
+  // 2. Dedication Page with Framed Child Photo
   const firstPhotoName = story.referencePhotos[0] ?? null;
   const photoBuf = firstPhotoName
     ? await resolveImageBuffer(story.id, firstPhotoName, null, resolver)
     : null;
   const childPhoto = photoBuf ? await embedBufferAsPdfImage(pdfDoc, photoBuf) : null;
-  const dedicationPage = pdfDoc.addPage([dims.width, dims.height]);
-  renderDedicationPage(dedicationPage, story, fonts, childPhoto, format);
+  addFramedBookPage(
+    pdfDoc,
+    panelW,
+    panelH,
+    bleedPt,
+    slugPt,
+    cropMarks,
+    COLOR_PAPER,
+    (page) => {
+      renderDedicationPage(page, story, fonts, childPhoto, format);
+    },
+  );
 
-  // 3. Story Pages 1..N (Pages 3..N+2)
+  // 3. Story Pages 1..N
   const sortedPages = [...story.pages].sort((a, b) => a.pageNumber - b.pageNumber);
   for (const storyPage of sortedPages) {
     const pageBuf = await resolveImageBuffer(
@@ -1161,13 +1527,58 @@ export async function generateStoryPdf(
       resolver,
     );
     const pageImage = pageBuf ? await embedBufferAsPdfImage(pdfDoc, pageBuf) : null;
-    const pdfPage = pdfDoc.addPage([dims.width, dims.height]);
-    renderStoryPage(pdfPage, storyPage, sortedPages.length, fonts, pageImage, format);
+    addFramedBookPage(
+      pdfDoc,
+      panelW,
+      panelH,
+      bleedPt,
+      slugPt,
+      cropMarks,
+      COLOR_PAPER,
+      (page) => {
+        renderStoryPage(page, storyPage, sortedPages.length, fonts, pageImage, format);
+      },
+    );
   }
 
-  // 4. Back Cover (Page N+3)
-  const backCoverPage = pdfDoc.addPage([dims.width, dims.height]);
-  renderBackCover(backCoverPage, story, fonts, format);
+  // 3b. Optional print-binding endpapers so total PDF page count is divisible by 4
+  if (padToMultipleOf4) {
+    const baseTotal =
+      layoutMode === 'interior'
+        ? sortedPages.length + 1 // dedication + pages
+        : sortedPages.length + 3; // front cover + dedication + pages + back cover
+    const paddingCount = (4 - (baseTotal % 4)) % 4;
+    for (let i = 0; i < paddingCount; i += 1) {
+      addFramedBookPage(
+        pdfDoc,
+        panelW,
+        panelH,
+        bleedPt,
+        slugPt,
+        cropMarks,
+        COLOR_PAPER,
+        (page) => {
+          renderEndpaperPage(page, story, fonts, format);
+        },
+      );
+    }
+  }
+
+  // 4. Back Cover (combined mode only)
+  if (layoutMode === 'combined') {
+    addFramedBookPage(
+      pdfDoc,
+      panelW,
+      panelH,
+      bleedPt,
+      slugPt,
+      cropMarks,
+      COLOR_PAPER_ALT,
+      (page) => {
+        renderBackCover(page, story, fonts, format);
+      },
+    );
+  }
 
   return pdfDoc.save();
 }

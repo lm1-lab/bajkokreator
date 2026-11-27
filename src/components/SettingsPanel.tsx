@@ -217,7 +217,7 @@ export function SettingsPanel({ initialSnapshot }: SettingsPanelProps) {
 
           {/* 4 Adapter Status Cards */}
           <section className="paper-card">
-            <h2 className="section-heading">Dostępne adaptery AI (`src/lib/ai/provider.ts`)</h2>
+            <h2 className="section-heading">Dostępne adaptery AI</h2>
             <p className="section-note">
               Wszystkie 4 adaptery implementują jeden kontrakt <code>StoryProvider</code> —
               przełączanie nie wymaga żadnych zmian w kreatorze ani generatorze PDF.

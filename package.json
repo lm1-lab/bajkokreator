@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "retention:sweep": "tsx scripts/retention-sweep.ts",
+    "catalog:validate": "tsx scripts/validate-catalog.ts"
   },
   "dependencies": {
     "@google/genai": "^3.6.1",

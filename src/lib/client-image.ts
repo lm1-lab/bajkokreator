@@ -91,12 +91,34 @@ export async function compressChildPhoto(
  * Fetches binary PDF from the API route and triggers a true Blob attachment download
  * so the browser NEVER renders raw %PDF- bytes in the document viewport.
  */
+export interface PdfDownloadOptions {
+  bleedMm?: number;
+  cropMarks?: boolean;
+  padToMultipleOf4?: boolean;
+  layoutMode?: 'combined' | 'interior' | 'cover-wrap';
+}
+
 export async function downloadStoryPdfBinary(
   storyId: string,
   format: BookFormat,
   fallbackSlug = 'bajka',
+  options?: PdfDownloadOptions,
 ): Promise<void> {
-  const url = `/api/stories/${encodeURIComponent(storyId)}/pdf?format=${encodeURIComponent(format)}`;
+  const params = new URLSearchParams({ format });
+  if (options?.bleedMm !== undefined && options.bleedMm > 0) {
+    params.set('bleedMm', String(options.bleedMm));
+  }
+  if (options?.cropMarks) {
+    params.set('cropMarks', 'true');
+  }
+  if (options?.padToMultipleOf4) {
+    params.set('padToMultipleOf4', 'true');
+  }
+  if (options?.layoutMode && options.layoutMode !== 'combined') {
+    params.set('layoutMode', options.layoutMode);
+  }
+
+  const url = `/api/stories/${encodeURIComponent(storyId)}/pdf?${params.toString()}`;
   const res = await fetch(url, {
     method: 'GET',
     headers: { Accept: 'application/pdf' },

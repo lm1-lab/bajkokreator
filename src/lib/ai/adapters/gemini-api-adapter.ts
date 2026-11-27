@@ -20,13 +20,18 @@ import {
   buildGeminiImagePrompt,
 } from '@/lib/polish/prompts';
 import { detectImageMime } from '@/lib/storage/security';
+import { getRuntimeSettings } from '@/lib/storage/store';
 import {
+  DEFAULT_GEMINI_IMAGE_SIZE,
+  GEMINI_IMAGE_SIZES,
+  GeminiImageSizeSchema,
   MAX_PAGE_COUNT,
   MIN_PAGE_COUNT,
   ModelIdSchema,
   StoryBlueprintSchema,
   type AuthStrategy,
   type BookFormat,
+  type GeminiImageSize,
   type ProviderId,
   type StoryBlueprint,
   type StoryInput,
@@ -43,6 +48,8 @@ export const SUPPORTED_GEMINI_IMAGE_MODELS = [
   'gemini-nano-banana-2.1',
   'gemini-3-pro-image',
 ] as const;
+export { DEFAULT_GEMINI_IMAGE_SIZE };
+export const SUPPORTED_GEMINI_IMAGE_SIZES = GEMINI_IMAGE_SIZES;
 
 export const GEMINI_HTTP_TIMEOUT_MS = 60_000;
 
@@ -61,9 +68,33 @@ export interface GeminiAdapterOptions {
   apiKey?: string;
   textModel?: string;
   imageModel?: string;
+  imageSize?: GeminiImageSize;
   env?: Record<string, string | undefined>;
   createClient?: GeminiClientFactory;
   statusResolver?: () => ProviderStatus;
+}
+
+export function resolveGeminiImageSize(
+  candidate?: string,
+  env: Record<string, string | undefined> = process.env,
+): GeminiImageSize {
+  const trimmedCandidate = candidate?.trim();
+  if (trimmedCandidate) {
+    const parsedCandidate = GeminiImageSizeSchema.safeParse(trimmedCandidate);
+    if (parsedCandidate.success) {
+      return parsedCandidate.data;
+    }
+  }
+
+  const trimmedEnv = env.GEMINI_IMAGE_SIZE?.trim();
+  if (trimmedEnv) {
+    const parsedEnv = GeminiImageSizeSchema.safeParse(trimmedEnv);
+    if (parsedEnv.success) {
+      return parsedEnv.data;
+    }
+  }
+
+  return DEFAULT_GEMINI_IMAGE_SIZE;
 }
 
 export function resolveGeminiModels(
@@ -143,9 +174,11 @@ export class GeminiApiStoryProvider implements StoryProvider {
   readonly consumesQuota = true;
 
   private readonly env: Record<string, string | undefined>;
+  private readonly usesProcessEnv: boolean;
   private readonly explicitApiKey?: string;
   private readonly explicitTextModel?: string;
   private readonly explicitImageModel?: string;
+  private readonly explicitImageSize?: GeminiImageSize;
   private readonly createClient?: GeminiClientFactory;
   private readonly statusResolver?: () => ProviderStatus;
 
@@ -154,11 +187,30 @@ export class GeminiApiStoryProvider implements StoryProvider {
     this.name = options.name ?? 'Google Gemini API';
     this.authStrategy = options.authStrategy ?? 'api_key';
     this.env = options.env ?? process.env;
+    this.usesProcessEnv = !options.env || options.env === process.env;
     this.explicitApiKey = options.apiKey;
     this.explicitTextModel = options.textModel;
     this.explicitImageModel = options.imageModel;
+    this.explicitImageSize = options.imageSize;
     this.createClient = options.createClient;
     this.statusResolver = options.statusResolver;
+  }
+
+  private async resolveEffectiveImageSize(): Promise<GeminiImageSize> {
+    if (this.explicitImageSize) {
+      return resolveGeminiImageSize(this.explicitImageSize, this.env);
+    }
+
+    if (this.usesProcessEnv) {
+      try {
+        const settings = await getRuntimeSettings();
+        return resolveGeminiImageSize(settings.geminiImageSize, this.env);
+      } catch {
+        return resolveGeminiImageSize(undefined, this.env);
+      }
+    }
+
+    return resolveGeminiImageSize(undefined, this.env);
   }
 
   get defaultModels(): { textModel: string; imageModel: string } {
@@ -383,6 +435,8 @@ export class GeminiApiStoryProvider implements StoryProvider {
       }),
     });
 
+    const imageSize = await this.resolveEffectiveImageSize();
+
     const response = await executeWithoutForbiddenRetries(
       () =>
         client.models.generateContent({
@@ -394,7 +448,7 @@ export class GeminiApiStoryProvider implements StoryProvider {
             // NEVER pass outputMimeType or personGeneration (throws synchronously in SDK).
             imageConfig: {
               aspectRatio,
-              imageSize: '1K',
+              imageSize,
             },
             automaticContinuation: false,
           },

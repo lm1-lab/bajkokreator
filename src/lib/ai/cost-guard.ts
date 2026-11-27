@@ -1,12 +1,37 @@
 import { ApiError } from '@google/genai';
 import {
+  DEFAULT_PAID_PRICING,
+  IMAGE_MODEL_PRICING,
+  IMAGE_SIZE_COST_MULTIPLIER,
+  USD_TO_PLN_RATE,
+  formatPln,
+  formatUsd,
+  resolveModelPricingTier,
+  roundCurrency,
+  type ModelPricingTier,
+} from '@/lib/cost-estimator';
+import {
+  DEFAULT_GEMINI_IMAGE_SIZE,
   DEFAULT_PAGE_COUNT,
   DEFAULT_RUNTIME_SETTINGS,
   MAX_PAGE_COUNT,
   MIN_PAGE_COUNT,
+  type GeminiImageSize,
   type GenerationMode,
   type ProviderId,
 } from '@/lib/types/story';
+
+export {
+  DEFAULT_PAID_PRICING,
+  IMAGE_MODEL_PRICING,
+  IMAGE_SIZE_COST_MULTIPLIER,
+  USD_TO_PLN_RATE,
+  formatPln,
+  formatUsd,
+  resolveModelPricingTier,
+  roundCurrency,
+  type ModelPricingTier,
+};
 
 // =============================================================================
 // AI Cost Guards, Pre-Start Cost Estimator, Preview-First Planner & Error Guard
@@ -108,12 +133,14 @@ export interface CostEstimateOptions {
   pageCount: number;
   generationMode: GenerationMode;
   imageModel?: string;
+  imageSize?: GeminiImageSize;
 }
 
 export interface CostEstimate {
   provider: ProviderId;
   generationMode: GenerationMode;
   imageModel: string;
+  imageSize?: GeminiImageSize;
   pageCount: number;
   isFree: boolean;
   totalImagesFullBook: number;
@@ -134,44 +161,10 @@ export interface CostEstimate {
   note: string;
 }
 
-const USD_TO_PLN_RATE = 4.0;
-
-interface ModelPricingTier {
-  unitImageUsd: number;
-  estimatedTextUsd: number;
-}
-
-const IMAGE_MODEL_PRICING: Readonly<Record<string, ModelPricingTier>> = {
-  'gemini-nano-banana-2.1': {
-    unitImageUsd: 0.039,
-    estimatedTextUsd: 0.004,
-  },
-  'gemini-3-pro-image': {
-    unitImageUsd: 0.134,
-    estimatedTextUsd: 0.006,
-  },
-};
-
-const DEFAULT_PAID_PRICING: ModelPricingTier = {
-  unitImageUsd: 0.06,
-  estimatedTextUsd: 0.005,
-};
-
-function roundCurrency(amount: number): number {
-  return Math.round(amount * 100) / 100;
-}
-
-function formatUsd(amount: number): string {
-  return `$${roundCurrency(amount).toFixed(2)}`;
-}
-
-function formatPln(amount: number): string {
-  return `${roundCurrency(amount).toFixed(2).replace('.', ',')} zł`;
-}
-
 export function estimateStoryCost(opts: CostEstimateOptions): CostEstimate {
   const plan = planGenerationSlots(opts.pageCount, opts.generationMode);
   const imageModel = opts.imageModel?.trim() || DEFAULT_RUNTIME_SETTINGS.imageModel;
+  const imageSize = opts.imageSize ?? DEFAULT_GEMINI_IMAGE_SIZE;
 
   if (opts.provider === 'demo' || opts.provider === 'manual') {
     const note =
@@ -184,6 +177,7 @@ export function estimateStoryCost(opts: CostEstimateOptions): CostEstimate {
       generationMode: opts.generationMode,
       imageModel:
         opts.provider === 'demo' ? 'demo-watercolor-plates-v1' : 'manual-user-upload',
+      imageSize,
       pageCount: plan.pageCount,
       isFree: true,
       totalImagesFullBook: plan.totalImagesFullBook,
@@ -205,7 +199,7 @@ export function estimateStoryCost(opts: CostEstimateOptions): CostEstimate {
     };
   }
 
-  const tier = IMAGE_MODEL_PRICING[imageModel] ?? DEFAULT_PAID_PRICING;
+  const tier = resolveModelPricingTier(imageModel, imageSize);
   const rawNowUsd = tier.estimatedTextUsd + plan.imagesNow * tier.unitImageUsd;
   const rawFullUsd =
     tier.estimatedTextUsd + plan.totalImagesFullBook * tier.unitImageUsd;
@@ -216,15 +210,16 @@ export function estimateStoryCost(opts: CostEstimateOptions): CostEstimate {
 
   const note =
     opts.provider === 'google-subscription'
-      ? `Szacunkowa wartość wywołań w puli subskrypcji Google AI (${plan.imagesNow} obrazów teraz, ${plan.imagesLater} później; model ${imageModel}). Obowiązuje dzienny limit bezpieczeństwa.`
+      ? `Szacunkowa wartość wywołań w puli subskrypcji Google AI (${plan.imagesNow} obrazów teraz, ${plan.imagesLater} później; model ${imageModel}, ${imageSize}). Obowiązuje dzienny limit bezpieczeństwa.`
       : opts.generationMode === 'preview-first'
         ? `Tryb próbny: najpierw powstanie okładka + 1. strona (${plan.imagesNow} obrazy), a pozostałe ${plan.imagesLater} stron wygenerujesz dopiero po akceptacji stylu.`
-        : `Pełna książka (${plan.totalImagesFullBook} ilustracji: okładka + ${plan.pageCount} stron) z modelem ${imageModel}.`;
+        : `Pełna książka (${plan.totalImagesFullBook} ilustracji: okładka + ${plan.pageCount} stron) z modelem ${imageModel} (${imageSize}).`;
 
   return {
     provider: opts.provider,
     generationMode: opts.generationMode,
     imageModel,
+    imageSize,
     pageCount: plan.pageCount,
     isFree: false,
     totalImagesFullBook: plan.totalImagesFullBook,

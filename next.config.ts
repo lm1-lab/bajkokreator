@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["pdf-lib", "@pdf-lib/fontkit", "sharp"],
   outputFileTracingIncludes: {
     "/api/stories/[id]/pdf": ["./public/fonts/**/*", "./public/demo-art/**/*"],
+    "/api/stories/[id]/preflight": ["./public/demo-art/**/*"],
   },
 };
 

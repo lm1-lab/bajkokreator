@@ -2,10 +2,43 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { copyTextToClipboard, downloadStoryPdfBinary } from '@/lib/client-image';
-import { formatAgeYears } from '@/lib/polish/inflection';
+import {
+  copyTextToClipboard,
+  downloadStoryPdfBinary,
+  type PdfDownloadOptions,
+} from '@/lib/client-image';
+import { declinePolishName, formatAgeYears } from '@/lib/polish/inflection';
 import { ART_STYLE_META, STORY_MOOD_META } from '@/lib/polish/prompts';
 import type { BookFormat, StoryPage, StoryRecord } from '@/lib/types/story';
+
+interface PreflightIssueItem {
+  code: string;
+  severity: 'error' | 'warning' | 'info';
+  slot: 'book' | 'cover' | 'dedication' | 'back-cover' | number;
+  message: string;
+}
+
+interface PreflightReportData {
+  storyId: string;
+  format: BookFormat;
+  checkedAt: string;
+  readyForPrint: boolean;
+  score: number;
+  summary: {
+    errors: number;
+    warnings: number;
+    info: number;
+  };
+  metrics: {
+    storyPages: number;
+    totalPdfPages: number;
+    paddingNeededForMultipleOf4: number;
+    expectedArtworkSlots: number;
+    readyArtworkSlots: number;
+    minEffectiveDpi: number | null;
+  };
+  issues: PreflightIssueItem[];
+}
 
 interface StoryReaderProps {
   initialStory: StoryRecord;
@@ -46,6 +79,19 @@ function resolvePageSrc(storyId: string, page: StoryPage): string | null {
   return page.demoAssetPath ?? null;
 }
 
+function formatProviderLabelPl(provider: StoryRecord['provider']): string {
+  switch (provider) {
+    case 'demo':
+      return 'Tryb Demo';
+    case 'manual':
+      return 'Tryb Ręczny';
+    case 'gemini-api':
+      return 'Gemini API';
+    case 'google-subscription':
+      return 'Subskrypcja Google AI';
+  }
+}
+
 export function StoryReader({
   initialStory,
   initialSlide,
@@ -65,10 +111,34 @@ export function StoryReader({
   // Feedback & async action states
   const [copiedNotice, setCopiedNotice] = useState<string | null>(null);
   const [isUploadingArt, setIsUploadingArt] = useState(false);
-  const [isDownloadingPdf, setIsDownloadingPdf] = useState<BookFormat | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState<string | null>(null);
   const [isContinuing, setIsContinuing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Pre-flight & Print-Ready PDF drawer states
+  const [preflight, setPreflight] = useState<PreflightReportData | null>(null);
+  const [isLoadingPreflight, setIsLoadingPreflight] = useState(true);
+  const [showPreflightPanel, setShowPreflightPanel] = useState(false);
+  const [showPrintReadyPanel, setShowPrintReadyPanel] = useState(false);
+
+  // RODO 2-step photo purge states
+  const [confirmingRodoPurge, setConfirmingRodoPurge] = useState(false);
+  const [isPurgingPhotos, setIsPurgingPhotos] = useState(false);
+
+  // Order draft drawer states
+  const [showOrderDrawer, setShowOrderDrawer] = useState(false);
+  const [orderRecipientName, setOrderRecipientName] = useState('');
+  const [orderLine1, setOrderLine1] = useState('');
+  const [orderPostalCode, setOrderPostalCode] = useState('');
+  const [orderCity, setOrderCity] = useState('');
+  const [orderEmail, setOrderEmail] = useState('');
+  const [orderPhone, setOrderPhone] = useState('');
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [createdOrder, setCreatedOrder] = useState<{
+    id: string;
+    orderNumber: string;
+  } | null>(null);
 
   const sortedPages = useMemo(
     () => [...story.pages].sort((a, b) => a.pageNumber - b.pageNumber),
@@ -82,6 +152,58 @@ export function StoryReader({
       ).length,
     [sortedPages],
   );
+
+  const declinedChild = useMemo(
+    () => declinePolishName(story.input.childName, story.input.gender),
+    [story.input.childName, story.input.gender],
+  );
+
+  const fetchPreflight = useCallback(async () => {
+    setIsLoadingPreflight(true);
+    try {
+      const res = await fetch(
+        `/api/stories/${encodeURIComponent(story.id)}/preflight?format=${encodeURIComponent(story.bookFormat)}`,
+        { cache: 'no-store' },
+      );
+      if (res.ok) {
+        const data = (await res.json()) as { report?: PreflightReportData };
+        if (data.report) {
+          setPreflight(data.report);
+        }
+      }
+    } catch {
+      // Ignore transient preflight fetch failures
+    } finally {
+      setIsLoadingPreflight(false);
+    }
+  }, [story.id, story.bookFormat]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPreflight() {
+      try {
+        const res = await fetch(
+          `/api/stories/${encodeURIComponent(story.id)}/preflight?format=${encodeURIComponent(story.bookFormat)}`,
+          { cache: 'no-store' },
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { report?: PreflightReportData };
+        if (!cancelled && data.report) {
+          setPreflight(data.report);
+        }
+      } catch {
+        // Ignore transient preflight fetch failures
+      } finally {
+        if (!cancelled) {
+          setIsLoadingPreflight(false);
+        }
+      }
+    }
+    void loadPreflight();
+    return () => {
+      cancelled = true;
+    };
+  }, [story.id, story.bookFormat, story.updatedAt, story.coverUpdatedAt, story.referencePhotos.length]);
 
   const pushRouteState = useCallback(
     (nextSlide: number, nextViewAll: boolean) => {
@@ -111,6 +233,31 @@ export function StoryReader({
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, [maxSlide]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (viewAll || editingPageNum !== null) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (event.key === 'ArrowLeft' && slide > 0) {
+        event.preventDefault();
+        pushRouteState(slide - 1, false);
+      } else if (event.key === 'ArrowRight' && slide < maxSlide) {
+        event.preventDefault();
+        pushRouteState(slide + 1, false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [viewAll, editingPageNum, slide, maxSlide, pushRouteState]);
 
   const currentStoryPage: StoryPage | null =
     slide >= 2 && slide <= sortedPages.length + 1
@@ -271,15 +418,26 @@ export function StoryReader({
     }
   }
 
-  async function handleDownloadPdf(format: BookFormat) {
-    setIsDownloadingPdf(format);
+  async function handleDownloadPdf(
+    format: BookFormat,
+    printOptions?: PdfDownloadOptions,
+  ) {
+    const downloadKey = printOptions?.bleedMm ? `print-${format}` : format;
+    setIsDownloadingPdf(downloadKey);
     setErrorMessage(null);
     try {
-      await downloadStoryPdfBinary(story.id, format, story.input.childName);
+      await downloadStoryPdfBinary(
+        story.id,
+        format,
+        story.input.childName,
+        printOptions,
+      );
       setStatusMessage(
-        format === 'square'
-          ? 'Pobrano plik PDF (Kwadrat 21×21 cm).'
-          : 'Pobrano plik PDF (A4 poziomy).',
+        printOptions?.bleedMm
+          ? `Pobrano PDF poligraficzny (${format === 'square' ? 'Kwadrat 21×21 cm' : 'A4 poziomy'}, spady ${printOptions.bleedMm} mm).`
+          : format === 'square'
+            ? 'Pobrano plik PDF (Kwadrat 21×21 cm).'
+            : 'Pobrano plik PDF (A4 poziomy).',
       );
     } catch (err) {
       setErrorMessage(
@@ -287,6 +445,106 @@ export function StoryReader({
       );
     } finally {
       setIsDownloadingPdf(null);
+    }
+  }
+
+  async function handlePurgeReferencePhotos() {
+    setIsPurgingPhotos(true);
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      const res = await fetch(
+        `/api/stories/${encodeURIComponent(story.id)}/reference-photos`,
+        { method: 'DELETE' },
+      );
+      const data = (await res.json()) as {
+        purged?: boolean;
+        purgedAt?: string;
+        deletedFiles?: string[];
+        error?: string;
+      };
+      if (!res.ok || !data.purged) {
+        setErrorMessage(data.error || 'Nie udało się usunąć zdjęć referencyjnych.');
+        return;
+      }
+      setStory((prev) => ({
+        ...prev,
+        referencePhotos: [],
+        referencePhotosPurgedAt: data.purgedAt ?? new Date().toISOString(),
+        updatedAt: data.purgedAt ?? new Date().toISOString(),
+      }));
+      setConfirmingRodoPurge(false);
+      setStatusMessage(
+        'Zdjęcia referencyjne dziecka zostały trwale usunięte (RODO). Bajka i ilustracje pozostały bez zmian.',
+      );
+    } catch {
+      setErrorMessage('Błąd sieci podczas usuwania zdjęć referencyjnych.');
+    } finally {
+      setIsPurgingPhotos(false);
+    }
+  }
+
+  async function handleCreateOrderDraft(event: React.FormEvent) {
+    event.preventDefault();
+    setIsSubmittingOrder(true);
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storyId: story.id,
+          bookFormat: story.bookFormat,
+          quantity: 1,
+          totalMinorUnits: 12900,
+          shippingAddress: {
+            recipientName: orderRecipientName.trim(),
+            line1: orderLine1.trim(),
+            postalCode: orderPostalCode.trim(),
+            city: orderCity.trim(),
+            countryCode: 'PL',
+            email: orderEmail.trim(),
+            ...(orderPhone.trim() ? { phone: orderPhone.trim() } : {}),
+          },
+        }),
+      });
+      const data = (await res.json()) as {
+        order?: { id: string; orderNumber: string };
+        error?: string;
+        issues?: Array<{ message: string }>;
+      };
+      if (!res.ok || !data.order) {
+        setErrorMessage(
+          data.issues?.[0]?.message ||
+            data.error ||
+            'Nie udało się utworzyć szkicu zamówienia.',
+        );
+        return;
+      }
+      setCreatedOrder({
+        id: data.order.id,
+        orderNumber: data.order.orderNumber,
+      });
+      setStatusMessage(
+        `Utworzono szkic zamówienia druku: ${data.order.orderNumber}.`,
+      );
+    } catch {
+      setErrorMessage('Błąd sieci podczas tworzenia szkicu zamówienia.');
+    } finally {
+      setIsSubmittingOrder(false);
+    }
+  }
+
+  function jumpToPreflightSlot(slot: PreflightIssueItem['slot']) {
+    if (slot === 'cover') {
+      pushRouteState(0, false);
+    } else if (slot === 'dedication') {
+      pushRouteState(1, false);
+    } else if (slot === 'back-cover') {
+      pushRouteState(maxSlide, false);
+    } else if (typeof slot === 'number') {
+      pushRouteState(slot + 1, false);
     }
   }
 
@@ -345,17 +603,108 @@ export function StoryReader({
               {story.title}
             </h1>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <span className="badge badge-gold">
               {ART_STYLE_META[story.input.artStyle].label}
             </span>
             <span className="badge badge-sage">
               {STORY_MOOD_META[story.input.mood].label}
             </span>
-            <span className="badge">Tryb: {story.provider}</span>
+            <span className="badge">{formatProviderLabelPl(story.provider)}</span>
+            <button
+              type="button"
+              className={`badge preflight-badge-btn ${
+                preflight
+                  ? preflight.readyForPrint
+                    ? 'badge-sage'
+                    : 'badge-danger'
+                  : 'badge-gold'
+              }`}
+              onClick={() => setShowPreflightPanel((prev) => !prev)}
+              aria-expanded={showPreflightPanel}
+              data-testid="preflight-badge"
+            >
+              {isLoadingPreflight
+                ? 'Sprawdzanie Pre-Flight…'
+                : preflight
+                  ? preflight.readyForPrint
+                    ? `Pre-Flight OK • ${preflight.score}/100`
+                    : `Pre-Flight: ${preflight.summary.errors} błędów • ${preflight.score}/100`
+                  : 'Pre-Flight: sprawdź'}
+            </button>
           </div>
         </div>
       </section>
+
+      {/* Expandable Pre-Flight Quality Panel */}
+      {showPreflightPanel && preflight && (
+        <section
+          className="paper-card preflight-panel"
+          data-testid="preflight-panel"
+          style={{ marginBottom: 16 }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              flexWrap: 'wrap',
+              marginBottom: 10,
+            }}
+          >
+            <div>
+              <strong>Kontrola jakości druku (Pre-Flight)</strong>
+              <span className="field-hint" style={{ marginLeft: 10 }}>
+                Wynik: {preflight.score}/100 • Stron PDF: {preflight.metrics.totalPdfPages} •
+                Gotowe ilustracje: {preflight.metrics.readyArtworkSlots}/
+                {preflight.metrics.expectedArtworkSlots}
+                {preflight.metrics.minEffectiveDpi !== null
+                  ? ` • Min. DPI: ${preflight.metrics.minEffectiveDpi}`
+                  : ''}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => void fetchPreflight()}
+            >
+              Odśwież Pre-Flight
+            </button>
+          </div>
+
+          {preflight.issues.length === 0 ? (
+            <p className="field-hint">
+              Brak uwag technicznych — książka spełnia wszystkie kryteria druku.
+            </p>
+          ) : (
+            <ul className="preflight-issue-list">
+              {preflight.issues.map((issue, idx) => (
+                <li
+                  key={`${issue.code}-${String(issue.slot)}-${idx}`}
+                  className={`preflight-issue preflight-issue--${issue.severity}`}
+                  data-testid="preflight-issue-item"
+                >
+                  <button
+                    type="button"
+                    className="preflight-issue-jump"
+                    onClick={() => jumpToPreflightSlot(issue.slot)}
+                  >
+                    <span className="preflight-issue-tag">
+                      {issue.severity === 'error'
+                        ? 'Błąd'
+                        : issue.severity === 'warning'
+                          ? 'Uwaga'
+                          : 'Info'}
+                    </span>
+                    <span>{issue.message}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {/* Preview-First continuation banner */}
       {(story.generationStage === 'preview' || pendingPagesCount > 0) &&
@@ -449,11 +798,280 @@ export function StoryReader({
               ? 'Tworzenie PDF…'
               : 'Pobierz PDF A4 poziomy'}
           </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${showPrintReadyPanel ? 'btn-sage' : 'btn-secondary'}`}
+            onClick={() => setShowPrintReadyPanel((prev) => !prev)}
+            aria-expanded={showPrintReadyPanel}
+            data-testid="print-ready-toggle"
+          >
+            PDF dla drukarni (spady 3 mm)
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${showOrderDrawer ? 'btn-sage' : 'btn-secondary'}`}
+            onClick={() => setShowOrderDrawer((prev) => !prev)}
+            aria-expanded={showOrderDrawer}
+            data-testid="order-draft-btn"
+          >
+            Zamówienie druku (szkic)
+          </button>
           <Link href="/library" className="btn btn-secondary btn-sm">
             Biblioteka
           </Link>
         </div>
       </div>
+
+      {/* Print-ready PDF & RODO action bar */}
+      {showPrintReadyPanel && (
+        <section className="paper-card print-drawer" style={{ marginBottom: 14 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div>
+              <strong>Eksport poligraficzny (POD / drukarnia)</strong>
+              <p className="field-hint">
+                Zawiera spady 3 mm, znaczniki cięcia poza BleedBox oraz dopełnienie stron do
+                wielokrotności 4 (wyklejka „Notatki i rysunki”).
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={isDownloadingPdf !== null}
+                onClick={() =>
+                  void handleDownloadPdf('square', {
+                    bleedMm: 3,
+                    cropMarks: true,
+                    padToMultipleOf4: true,
+                  })
+                }
+                data-testid="download-pdf-print-square"
+              >
+                {isDownloadingPdf === 'print-square'
+                  ? 'Tworzenie PDF…'
+                  : 'Drukarnia PDF: Kwadrat 21×21 (3 mm)'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={isDownloadingPdf !== null}
+                onClick={() =>
+                  void handleDownloadPdf('a4-landscape', {
+                    bleedMm: 3,
+                    cropMarks: true,
+                    padToMultipleOf4: true,
+                  })
+                }
+                data-testid="download-pdf-print-a4"
+              >
+                {isDownloadingPdf === 'print-a4'
+                  ? 'Tworzenie PDF…'
+                  : 'Drukarnia PDF: A4 poziomy (3 mm)'}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* RODO Reference Photo Strip */}
+      <div className="rodo-strip" style={{ marginBottom: 14 }}>
+        {story.referencePhotos.length > 0 ? (
+          <>
+            <span className="field-hint">
+              <strong>RODO:</strong> zapisane zdjęcia referencyjne dziecka (
+              {story.referencePhotos.length}). Możesz je trwale usunąć po wygenerowaniu bajki.
+            </span>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {confirmingRodoPurge ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-sm"
+                    disabled={isPurgingPhotos}
+                    onClick={() => void handlePurgeReferencePhotos()}
+                    data-testid="rodo-purge-confirm"
+                  >
+                    {isPurgingPhotos
+                      ? 'Usuwanie zdjęć…'
+                      : 'Potwierdź trwałe usunięcie zdjęć'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setConfirmingRodoPurge(false)}
+                  >
+                    Anuluj
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setConfirmingRodoPurge(true)}
+                  data-testid="rodo-purge-btn"
+                >
+                  Usuń zdjęcia dziecka (RODO)
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <span className="badge badge-sage" data-testid="rodo-purged-badge">
+            RODO: zdjęcia referencyjne dziecka zostały usunięte
+          </span>
+        )}
+      </div>
+
+      {/* Order Draft Drawer */}
+      {showOrderDrawer && (
+        <section className="paper-card order-drawer" style={{ marginBottom: 16 }}>
+          <h2 className="section-heading" style={{ marginBottom: 6 }}>
+            Zamówienie druku (szkic bez zobowiązań płatniczych)
+          </h2>
+          <p className="section-note" style={{ marginBottom: 12 }}>
+            Utwórz szkic zamówienia z numerem <code>BK-RRRR-XXXXXX</code>, aby powiązać
+            książkę z kontrolą Pre-Flight i śledzeniem statusu na stronie Zamówienia.
+          </p>
+
+          {createdOrder ? (
+            <div className="alert alert-success" role="status">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                <span>
+                  Utworzono szkic zamówienia:{' '}
+                  <strong data-testid="order-created-number">
+                    {createdOrder.orderNumber}
+                  </strong>
+                </span>
+                <Link href="/orders" className="btn btn-secondary btn-sm">
+                  Sprawdź status w Zamówieniach →
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <form
+              className="form-grid"
+              data-testid="order-draft-form"
+              onSubmit={(e) => void handleCreateOrderDraft(e)}
+            >
+              <div className="field-group">
+                <label className="field-label" htmlFor="orderRecipientName">
+                  Imię i nazwisko odbiorcy
+                </label>
+                <input
+                  id="orderRecipientName"
+                  name="recipientName"
+                  data-testid="order-recipient-input"
+                  type="text"
+                  className="field-input"
+                  required
+                  value={orderRecipientName}
+                  onChange={(e) => setOrderRecipientName(e.target.value)}
+                  placeholder="np. Anna Kowalska"
+                />
+              </div>
+              <div className="field-group">
+                <label className="field-label" htmlFor="orderLine1">
+                  Ulica i numer
+                </label>
+                <input
+                  id="orderLine1"
+                  name="line1"
+                  data-testid="order-line1-input"
+                  type="text"
+                  className="field-input"
+                  required
+                  value={orderLine1}
+                  onChange={(e) => setOrderLine1(e.target.value)}
+                  placeholder="np. ul. Bajkowa 12/4"
+                />
+              </div>
+              <div className="field-group">
+                <label className="field-label" htmlFor="orderPostalCode">
+                  Kod pocztowy
+                </label>
+                <input
+                  id="orderPostalCode"
+                  name="postalCode"
+                  data-testid="order-postal-input"
+                  type="text"
+                  className="field-input"
+                  required
+                  value={orderPostalCode}
+                  onChange={(e) => setOrderPostalCode(e.target.value)}
+                  placeholder="np. 00-001"
+                />
+              </div>
+              <div className="field-group">
+                <label className="field-label" htmlFor="orderCity">
+                  Miasto
+                </label>
+                <input
+                  id="orderCity"
+                  name="city"
+                  data-testid="order-city-input"
+                  type="text"
+                  className="field-input"
+                  required
+                  value={orderCity}
+                  onChange={(e) => setOrderCity(e.target.value)}
+                  placeholder="np. Warszawa"
+                />
+              </div>
+              <div className="field-group">
+                <label className="field-label" htmlFor="orderEmail">
+                  E-mail
+                </label>
+                <input
+                  id="orderEmail"
+                  name="email"
+                  data-testid="order-email-input"
+                  type="email"
+                  className="field-input"
+                  required
+                  value={orderEmail}
+                  onChange={(e) => setOrderEmail(e.target.value)}
+                  placeholder="np. anna@example.com"
+                />
+              </div>
+              <div className="field-group">
+                <label className="field-label" htmlFor="orderPhone">
+                  Telefon (opcjonalnie)
+                </label>
+                <input
+                  id="orderPhone"
+                  name="phone"
+                  data-testid="order-phone-input"
+                  type="tel"
+                  className="field-input"
+                  value={orderPhone}
+                  onChange={(e) => setOrderPhone(e.target.value)}
+                  placeholder="np. +48 600 100 200"
+                />
+              </div>
+              <div className="field-group full-span">
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm"
+                  disabled={isSubmittingOrder}
+                  data-testid="order-draft-submit"
+                >
+                  {isSubmittingOrder
+                    ? 'Zapisywanie szkicu…'
+                    : 'Utwórz szkic zamówienia druku'}
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
+      )}
 
       {errorMessage && (
         <div className="alert alert-error" role="alert" style={{ marginBottom: 14 }}>
@@ -693,7 +1311,7 @@ export function StoryReader({
               <p className="badge badge-terracotta">
                 {story.input.dedicationFrom
                   ? `Z miłością — ${story.input.dedicationFrom}`
-                  : `Dla ${story.input.childName} (${formatAgeYears(story.input.childAge)})`}
+                  : `Dla ${declinedChild.genitive} (${formatAgeYears(story.input.childAge)})`}
               </p>
             </div>
           )}

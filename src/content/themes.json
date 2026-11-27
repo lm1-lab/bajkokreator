@@ -1,0 +1,251 @@
+{
+  "version": 1,
+  "themes": [
+    {
+      "id": "lantern-forest",
+      "label": "Las Złotych Latarni",
+      "theme": "wyprawa do zaczarowanego lasu złotych latarni i poszukiwanie zagubionego klucza do krainy bajek",
+      "suggestedMood": "magical-adventure",
+      "suggestedArtStyle": "watercolor",
+      "season": "evergreen",
+      "lifecycleStatus": "active",
+      "priority": 10,
+      "ageRange": { "min": 2, "max": 10 },
+      "promptHints": {
+        "seasonalMotifs": ["glowing golden lanterns", "fireflies", "mossy woodland trail"],
+        "lightingOverride": "warm golden twilight dappled through tall forest trees"
+      },
+      "tags": ["las", "magia", "przygoda"]
+    },
+    {
+      "id": "cloud-balloon",
+      "label": "Balon ponad chmurami",
+      "theme": "podróż kolorowym balonem ponad miękkimi chmurami w poszukiwaniu tęczowej wyspy marzeń",
+      "suggestedMood": "funny-playful",
+      "suggestedArtStyle": "storybook-gouache",
+      "season": "evergreen",
+      "lifecycleStatus": "active",
+      "priority": 20,
+      "ageRange": { "min": 2, "max": 9 },
+      "tags": ["podróż", "balon", "chmury"]
+    },
+    {
+      "id": "secret-bakery",
+      "label": "Cukiernia Leśnych Skrzatów",
+      "theme": "odkrycie ukrytej cukierni leśnych skrzatów i upieczenie ciasta o smaku śmiechu i przyjaźni",
+      "suggestedMood": "warm-cozy",
+      "suggestedArtStyle": "watercolor",
+      "season": "evergreen",
+      "lifecycleStatus": "active",
+      "priority": 30,
+      "ageRange": { "min": 1, "max": 8 },
+      "tags": ["skrzaty", "przyjaźń", "ciepło"]
+    },
+    {
+      "id": "starlight-train",
+      "label": "Pociąg do Krainy Snów",
+      "theme": "nocna podróż cichym pociągiem wśród srebrnych gwiazd ku spokojnej przystani dobrych snów",
+      "suggestedMood": "bedtime-calm",
+      "suggestedArtStyle": "watercolor",
+      "season": "evergreen",
+      "lifecycleStatus": "active",
+      "priority": 40,
+      "ageRange": { "min": 1, "max": 7 },
+      "tags": ["dobranoc", "pociąg", "gwiazdy"]
+    },
+    {
+      "id": "coral-lighthouse",
+      "label": "Tajemnica Latarni Morskiej",
+      "theme": "wielka morska przygoda w starej latarni i odnalezienie zaginionej mapy śpiewających muszelek",
+      "suggestedMood": "magical-adventure",
+      "suggestedArtStyle": "storybook-gouache",
+      "season": "evergreen",
+      "lifecycleStatus": "active",
+      "priority": 50,
+      "ageRange": { "min": 3, "max": 12 },
+      "tags": ["morze", "latarnia", "mapa"]
+    },
+    {
+      "id": "clockwork-garden",
+      "label": "Ogród Motyli z Papieru",
+      "theme": "spacer po tajemniczym ogrodzie, w którym origami budzi się do życia i uczy odwagi oraz dobroci",
+      "suggestedMood": "warm-cozy",
+      "suggestedArtStyle": "paper-cutout",
+      "season": "evergreen",
+      "lifecycleStatus": "active",
+      "priority": 60,
+      "ageRange": { "min": 3, "max": 12 },
+      "tags": ["ogród", "origami", "odwaga"]
+    },
+    {
+      "id": "winter-star-express",
+      "label": "Świąteczny Ekspres Gwiazdki",
+      "theme": "zimowa wyprawa srebrnymi saniami po zagubioną gwiazdkę wigilijną i rozświetlenie choinki dla całego miasteczka",
+      "suggestedMood": "warm-cozy",
+      "suggestedArtStyle": "watercolor",
+      "season": "christmas",
+      "lifecycleStatus": "active",
+      "badge": "Świąteczne",
+      "priority": 1,
+      "ageRange": { "min": 2, "max": 10 },
+      "orderCutoffLeadDays": 12,
+      "activeWindow": {
+        "startMonthDay": "11-15",
+        "endMonthDay": "01-06"
+      },
+      "promptHints": {
+        "wardrobeHint": "cozy knitted wool sweater, crimson scarf, and warm mittens",
+        "seasonalMotifs": ["soft falling snow", "twinkling spruce tree", "golden Christmas star"],
+        "lightingOverride": "warm amber lantern glow against deep cobalt winter twilight"
+      },
+      "tags": ["święta", "mikołajki", "zima", "choinka"]
+    },
+    {
+      "id": "grandparents-memory-jar",
+      "label": "Słoik Wspomnień Babci i Dziadka",
+      "theme": "czarodziejska podróż do krainy dawnych opowieści, by napełnić świetlisty słoik najpiękniejszymi chwilami dla Babci i Dziadka",
+      "suggestedMood": "warm-cozy",
+      "suggestedArtStyle": "vintage-etching",
+      "season": "grandparents-day",
+      "lifecycleStatus": "active",
+      "badge": "Dzień Babci i Dziadka",
+      "priority": 2,
+      "ageRange": { "min": 2, "max": 11 },
+      "orderCutoffLeadDays": 10,
+      "activeWindow": {
+        "startMonthDay": "01-07",
+        "endMonthDay": "01-25"
+      },
+      "promptHints": {
+        "seasonalMotifs": ["glowing memory jar", "vintage family album", "cozy hearth"],
+        "lightingOverride": "soft nostalgic afternoon tea-lamp light"
+      },
+      "tags": ["babcia", "dziadek", "rodzina", "prezent"]
+    },
+    {
+      "id": "winter-break-alpine",
+      "label": "Zimowa Wyprawa Śnieżnych Odkrywców",
+      "theme": "feryjna wyprawa w bajkowe ośnieżone góry, budowa kryształowego igloo i poznanie sympatycznego górskiego świstaka",
+      "suggestedMood": "magical-adventure",
+      "suggestedArtStyle": "storybook-gouache",
+      "season": "winter",
+      "lifecycleStatus": "active",
+      "badge": "Ferie Zimowe",
+      "priority": 3,
+      "ageRange": { "min": 3, "max": 12 },
+      "orderCutoffLeadDays": 8,
+      "activeWindow": {
+        "startMonthDay": "01-26",
+        "endMonthDay": "03-09"
+      },
+      "promptHints": {
+        "wardrobeHint": "warm winter parka, pom-pom beanie, and snow boots",
+        "seasonalMotifs": ["snowy pine peaks", "wooden sled", "sparkling frost crystals"]
+      },
+      "tags": ["ferie", "zima", "góry", "śnieg"]
+    },
+    {
+      "id": "easter-meadow-quest",
+      "label": "Wiosenna Polana Pisanek",
+      "theme": "wiosenne poszukiwanie śpiewających pisanek z małym zajączkiem po rozkwitającej łące pełnej tajemnic",
+      "suggestedMood": "funny-playful",
+      "suggestedArtStyle": "watercolor",
+      "season": "easter",
+      "lifecycleStatus": "active",
+      "badge": "Wiosna i Wielkanoc",
+      "priority": 3,
+      "ageRange": { "min": 1, "max": 9 },
+      "orderCutoffLeadDays": 10,
+      "activeWindow": {
+        "startMonthDay": "03-10",
+        "endMonthDay": "04-30"
+      },
+      "promptHints": {
+        "seasonalMotifs": ["hand-painted Polish pisanki eggs", "blooming crocuses", "meadow bunny"],
+        "lightingOverride": "fresh bright spring morning sunshine"
+      },
+      "tags": ["wielkanoc", "wiosna", "zajączek"]
+    },
+    {
+      "id": "parents-day-garden",
+      "label": "Majowy Ogród Wdzięczności",
+      "theme": "wiosenna wyprawa po bukiet bajkowych kwiatów i tajemne liście wdzięczności dla kochanej Mamy i kochanego Taty",
+      "suggestedMood": "warm-cozy",
+      "suggestedArtStyle": "watercolor",
+      "season": "spring",
+      "lifecycleStatus": "active",
+      "badge": "Rodzinny Maj",
+      "priority": 4,
+      "ageRange": { "min": 2, "max": 11 },
+      "orderCutoffLeadDays": 9,
+      "activeWindow": {
+        "startMonthDay": "05-01",
+        "endMonthDay": "05-14"
+      },
+      "promptHints": {
+        "seasonalMotifs": ["blossoming apple orchard", "woven picnic basket", "meadow wildflowers"]
+      },
+      "tags": ["mama", "tata", "wiosna", "rodzina"]
+    },
+    {
+      "id": "childrens-day-island",
+      "label": "Wyspa Wielkich Marzeń",
+      "theme": "wyprawa na radosną wyspę, gdzie każde dziecięce marzenie zamienia się w bajkową budowlę i przyjaznego kompana",
+      "suggestedMood": "magical-adventure",
+      "suggestedArtStyle": "storybook-gouache",
+      "season": "childrens-day",
+      "lifecycleStatus": "active",
+      "badge": "Dzień Dziecka",
+      "priority": 4,
+      "ageRange": { "min": 2, "max": 12 },
+      "orderCutoffLeadDays": 10,
+      "activeWindow": {
+        "startMonthDay": "05-15",
+        "endMonthDay": "06-10"
+      },
+      "tags": ["dzień dziecka", "marzenia", "przygoda"]
+    },
+    {
+      "id": "summer-amber-cove",
+      "label": "Wakacje w Bursztynowej Zatoce",
+      "theme": "letnia przygoda na słonecznej plaży i odkrycie sekretnej łódki, która prowadzi do zatoki śpiewających fal",
+      "suggestedMood": "magical-adventure",
+      "suggestedArtStyle": "watercolor",
+      "season": "summer",
+      "lifecycleStatus": "active",
+      "badge": "Wakacje",
+      "priority": 5,
+      "ageRange": { "min": 2, "max": 12 },
+      "orderCutoffLeadDays": 8,
+      "activeWindow": {
+        "startMonthDay": "06-11",
+        "endMonthDay": "08-25"
+      },
+      "promptHints": {
+        "seasonalMotifs": ["golden Baltic sand dunes", "wooden sailboat", "glowing sea amber"]
+      },
+      "tags": ["wakacje", "lato", "morze", "bursztyn"]
+    },
+    {
+      "id": "autumn-acorn-academy",
+      "label": "Jesienna Szkoła Leśnych Odkrywców",
+      "theme": "pierwszy dzień w kolorowym jesiennym lesie, gdzie wiewiórki i sowy dzielą się sekretem odwagi przed nowymi wyzwaniami",
+      "suggestedMood": "warm-cozy",
+      "suggestedArtStyle": "paper-cutout",
+      "season": "autumn",
+      "lifecycleStatus": "active",
+      "badge": "Jesień",
+      "priority": 6,
+      "ageRange": { "min": 3, "max": 11 },
+      "orderCutoffLeadDays": 8,
+      "activeWindow": {
+        "startMonthDay": "08-26",
+        "endMonthDay": "11-14"
+      },
+      "promptHints": {
+        "seasonalMotifs": ["crimson maple leaves", "acorn lanterns", "friendly forest owl"]
+      },
+      "tags": ["jesień", "przedszkole", "szkoła", "las"]
+    }
+  ]
+}

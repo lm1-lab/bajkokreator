@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
-import { handleApiError } from '@/lib/api-helpers';
+import {
+  errorResponse,
+  getOrCreateRequestId,
+  handleApiError,
+  jsonResponse,
+} from '@/lib/api-helpers';
+import { parseJsonBodyWithLimit } from '@/lib/security/rate-limit';
 import { assertValidStoryId } from '@/lib/storage/security';
-import { deleteStory, getStory, saveStory } from '@/lib/storage/store';
+import { deleteStory, getStory, updateStory } from '@/lib/storage/store';
 import { PatchStorySchema } from '@/lib/types/story';
 
 export const runtime = 'nodejs';
@@ -12,25 +18,25 @@ interface RouteContext {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: RouteContext,
 ): Promise<NextResponse> {
+  const requestId = getOrCreateRequestId(request);
   try {
     const { id } = await context.params;
     const safeId = assertValidStoryId(id);
     const story = await getStory(safeId);
     if (!story) {
-      return NextResponse.json(
-        { error: 'Nie znaleziono bajki o podanym identyfikatorze.', code: 'NOT_FOUND' },
-        { status: 404 },
-      );
+      return errorResponse({
+        error: 'Nie znaleziono bajki o podanym identyfikatorze.',
+        code: 'NOT_FOUND',
+        status: 404,
+        requestId,
+      });
     }
-    return NextResponse.json(
-      { story },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } },
-    );
+    return jsonResponse({ story }, { status: 200, requestId });
   } catch (err) {
-    return handleApiError(err);
+    return handleApiError(err, requestId);
   }
 }
 
@@ -38,83 +44,94 @@ export async function PATCH(
   request: Request,
   context: RouteContext,
 ): Promise<NextResponse> {
+  const requestId = getOrCreateRequestId(request);
   try {
     const { id } = await context.params;
     const safeId = assertValidStoryId(id);
-    const story = await getStory(safeId);
-    if (!story) {
-      return NextResponse.json(
-        { error: 'Nie znaleziono bajki o podanym identyfikatorze.', code: 'NOT_FOUND' },
-        { status: 404 },
-      );
-    }
 
-    const rawBody: unknown = await request.json();
+    const rawBody = await parseJsonBodyWithLimit(request, 128 * 1024);
     const patch = PatchStorySchema.parse(rawBody);
-    const now = new Date().toISOString();
 
-    const updatedPages = [...story.pages];
-    const pageUpdates = [
-      ...(patch.page ? [patch.page] : []),
-      ...(patch.pages ?? []),
-    ];
+    let missingPageNumber: number | null = null;
+    const updatedStory = await updateStory(safeId, (story) => {
+      const updatedPages = [...story.pages];
+      const pageUpdates = [
+        ...(patch.page ? [patch.page] : []),
+        ...(patch.pages ?? []),
+      ];
 
-    for (const item of pageUpdates) {
-      const idx = updatedPages.findIndex((p) => p.pageNumber === item.pageNumber);
-      if (idx === -1) {
-        return NextResponse.json(
-          {
-            error: `Strona o numerze ${item.pageNumber} nie istnieje w tej bajce.`,
-            code: 'PAGE_NOT_FOUND',
-          },
-          { status: 404 },
-        );
+      for (const item of pageUpdates) {
+        const idx = updatedPages.findIndex((p) => p.pageNumber === item.pageNumber);
+        if (idx === -1) {
+          missingPageNumber = item.pageNumber;
+          return null;
+        }
+        updatedPages[idx] = {
+          ...updatedPages[idx],
+          text: item.text,
+          ...(item.chapterTitle !== undefined ? { chapterTitle: item.chapterTitle } : {}),
+        };
       }
-      updatedPages[idx] = {
-        ...updatedPages[idx],
-        text: item.text,
-        ...(item.chapterTitle !== undefined ? { chapterTitle: item.chapterTitle } : {}),
+
+      return {
+        ...story,
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.subtitle !== undefined ? { subtitle: patch.subtitle } : {}),
+        ...(patch.dedicationText !== undefined
+          ? { dedicationText: patch.dedicationText }
+          : {}),
+        ...(patch.backCoverBlurb !== undefined
+          ? { backCoverBlurb: patch.backCoverBlurb }
+          : {}),
+        ...(patch.bookFormat !== undefined ? { bookFormat: patch.bookFormat } : {}),
+        pages: updatedPages,
+        updatedAt: new Date().toISOString(),
       };
+    });
+
+    if (missingPageNumber !== null) {
+      return errorResponse({
+        error: `Strona o numerze ${missingPageNumber} nie istnieje w tej bajce.`,
+        code: 'PAGE_NOT_FOUND',
+        status: 404,
+        requestId,
+      });
     }
 
-    const updatedStory = {
-      ...story,
-      ...(patch.title !== undefined ? { title: patch.title } : {}),
-      ...(patch.subtitle !== undefined ? { subtitle: patch.subtitle } : {}),
-      ...(patch.dedicationText !== undefined
-        ? { dedicationText: patch.dedicationText }
-        : {}),
-      ...(patch.backCoverBlurb !== undefined
-        ? { backCoverBlurb: patch.backCoverBlurb }
-        : {}),
-      ...(patch.bookFormat !== undefined ? { bookFormat: patch.bookFormat } : {}),
-      pages: updatedPages,
-      updatedAt: now,
-    };
+    if (!updatedStory) {
+      return errorResponse({
+        error: 'Nie znaleziono bajki o podanym identyfikatorze.',
+        code: 'NOT_FOUND',
+        status: 404,
+        requestId,
+      });
+    }
 
-    await saveStory(updatedStory);
-    return NextResponse.json({ story: updatedStory }, { status: 200 });
+    return jsonResponse({ story: updatedStory }, { status: 200, requestId });
   } catch (err) {
-    return handleApiError(err);
+    return handleApiError(err, requestId);
   }
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   context: RouteContext,
 ): Promise<NextResponse> {
+  const requestId = getOrCreateRequestId(request);
   try {
     const { id } = await context.params;
     const safeId = assertValidStoryId(id);
     const deleted = await deleteStory(safeId);
     if (!deleted) {
-      return NextResponse.json(
-        { error: 'Nie znaleziono bajki do usunięcia.', code: 'NOT_FOUND' },
-        { status: 404 },
-      );
+      return errorResponse({
+        error: 'Nie znaleziono bajki do usunięcia.',
+        code: 'NOT_FOUND',
+        status: 404,
+        requestId,
+      });
     }
-    return NextResponse.json({ deleted: true, id: safeId }, { status: 200 });
+    return jsonResponse({ deleted: true, id: safeId }, { status: 200, requestId });
   } catch (err) {
-    return handleApiError(err);
+    return handleApiError(err, requestId);
   }
 }

@@ -11,10 +11,13 @@ import {
   CHILD_GENDERS,
   ChildGenderSchema,
   CreateStoryPayloadSchema,
+  DEFAULT_GEMINI_IMAGE_SIZE,
   DEFAULT_PAGE_COUNT,
   DEFAULT_RUNTIME_SETTINGS,
+  GEMINI_IMAGE_SIZES,
   GENERATION_MODES,
   GENERATION_STAGES,
+  GeminiImageSizeSchema,
   GenerationModeSchema,
   GenerationStageSchema,
   IMAGE_STATUSES,
@@ -29,13 +32,16 @@ import {
   PhotoBatchSchema,
   ProviderIdSchema,
   RuntimeSettingsSchema,
+  STORAGE_MODES,
   STORY_MOODS,
+  StorageModeSchema,
   StoryBlueprintSchema,
   StoryIdSchema,
   StoryInputSchema,
   StoryMoodSchema,
   StoryPageSchema,
   StoryRecordSchema,
+  StorySummarySchema,
   UploadedPhotoMetaSchema,
   extractStoryInput,
   formatZodIssues,
@@ -46,6 +52,7 @@ import {
   type StoryInput,
   type StoryPage,
   type StoryRecord,
+  type StorySummary,
 } from '@/lib/types/story';
 
 function assertBidirectionalTypeMatch<A, B extends A>(
@@ -65,6 +72,9 @@ describe('0. Compile-time domain interface vs Zod schema alignment', () => {
     );
     expect(
       assertBidirectionalTypeMatch<StoryRecord, z.output<typeof StoryRecordSchema>>(true),
+    ).toBe(true);
+    expect(
+      assertBidirectionalTypeMatch<StorySummary, z.output<typeof StorySummarySchema>>(true),
     ).toBe(true);
     expect(
       assertBidirectionalTypeMatch<RuntimeSettings, z.output<typeof RuntimeSettingsSchema>>(true),
@@ -736,3 +746,110 @@ describe('9. formatZodIssues', () => {
     }
   });
 });
+
+describe('10. M1 Schema Extensions (themeId, StorySummary photo fields, StorageMode, GeminiImageSize)', () => {
+  it('accepts valid optional StoryInput.themeId, normalizes blanks to undefined, and rejects invalid slugs', () => {
+    const withThemeId = CreateStoryPayloadSchema.parse({
+      ...makeMinimalStoryInput(),
+      themeId: '  winter-star-express  ',
+    });
+    expect(withThemeId.themeId).toBe('winter-star-express');
+    expect(extractStoryInput(withThemeId).themeId).toBe('winter-star-express');
+
+    const withBlankThemeId = CreateStoryPayloadSchema.parse({
+      ...makeMinimalStoryInput(),
+      themeId: '   ',
+    });
+    expect(withBlankThemeId.themeId).toBeUndefined();
+    expect('themeId' in extractStoryInput(withBlankThemeId)).toBe(false);
+
+    const withNullThemeId = CreateStoryPayloadSchema.parse({
+      ...makeMinimalStoryInput(),
+      themeId: null,
+    });
+    expect(withNullThemeId.themeId).toBeUndefined();
+
+    for (const badSlug of ['UPPERCASE', 'a', '../evil', 'bad slug', '-leading']) {
+      expect(
+        StoryInputSchema.safeParse({
+          ...makeMinimalStoryInput(),
+          themeId: badSlug,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('validates StorySummarySchema referencePhotosCount and optional referencePhotosPurgedAt', () => {
+    const now = '2026-11-27T10:00:00.000Z';
+    const baseSummary: StorySummary = {
+      id: 'zosia-summary-01',
+      title: 'Zosia i Las',
+      subtitle: 'Opowieść',
+      childName: 'Zosia',
+      childAge: 5,
+      gender: 'girl',
+      provider: 'demo',
+      generationStage: 'complete',
+      bookFormat: 'square',
+      pageCount: 10,
+      coverUrl: '/demo-art/cover.jpg',
+      referencePhotosCount: 2,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    expect(StorySummarySchema.parse(baseSummary)).toEqual(baseSummary);
+    expect(
+      StorySummarySchema.parse({
+        ...baseSummary,
+        referencePhotosCount: 0,
+        referencePhotosPurgedAt: now,
+      }).referencePhotosPurgedAt,
+    ).toBe(now);
+
+    expect(
+      StorySummarySchema.safeParse({ ...baseSummary, referencePhotosCount: -1 }).success,
+    ).toBe(false);
+    expect(
+      StorySummarySchema.safeParse({ ...baseSummary, referencePhotosCount: 5 }).success,
+    ).toBe(false);
+    expect(
+      StorySummarySchema.safeParse({
+        ...baseSummary,
+        referencePhotosPurgedAt: 'not-a-timestamp',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('validates StorageModeSchema (including custom) and GeminiImageSizeSchema on RuntimeSettings & PatchSettings', () => {
+    expect(STORAGE_MODES).toEqual(['local', 'tmp-fallback', 'custom']);
+    for (const mode of STORAGE_MODES) {
+      expect(StorageModeSchema.parse(mode)).toBe(mode);
+    }
+
+    expect(GEMINI_IMAGE_SIZES).toEqual(['1K', '2K']);
+    expect(DEFAULT_GEMINI_IMAGE_SIZE).toBe('1K');
+    expect(GeminiImageSizeSchema.parse('1K')).toBe('1K');
+    expect(GeminiImageSizeSchema.parse('2K')).toBe('2K');
+    for (const bad of ['4K', '1k', '2k', '', 'HD']) {
+      expect(GeminiImageSizeSchema.safeParse(bad).success).toBe(false);
+    }
+
+    // Legacy 5-field settings without geminiImageSize still parse cleanly
+    const legacyParsed = RuntimeSettingsSchema.parse({
+      activeProvider: 'demo',
+      textModel: 'gemini-3.8-flash',
+      imageModel: 'gemini-nano-banana-2.1',
+      defaultPreviewFirst: false,
+      defaultBookFormat: 'square',
+    });
+    expect(legacyParsed.geminiImageSize).toBeUndefined();
+
+    // PatchSettings accepts geminiImageSize: '2K' and rejects invalid sizes
+    expect(PatchSettingsSchema.parse({ geminiImageSize: '2K' })).toEqual({
+      geminiImageSize: '2K',
+    });
+    expect(PatchSettingsSchema.safeParse({ geminiImageSize: '4K' }).success).toBe(false);
+  });
+});
+

@@ -38,7 +38,9 @@ export const IMAGE_STATUSES = [
   'custom-uploaded',
   'error',
 ] as const;
-export const STORAGE_MODES = ['local', 'tmp-fallback'] as const;
+export const STORAGE_MODES = ['local', 'tmp-fallback', 'custom'] as const;
+export const GEMINI_IMAGE_SIZES = ['1K', '2K'] as const;
+export const DEFAULT_GEMINI_IMAGE_SIZE = '1K' as const;
 export const ALLOWED_IMAGE_MIMES = [
   'image/jpeg',
   'image/png',
@@ -64,6 +66,9 @@ export const CHILD_NAME_REGEX = /^\p{L}(?:[\p{L} '’-]*\p{L})?$/u;
 
 /** Safe model identifier: alphanumeric start, no whitespace or control characters. */
 export const MODEL_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,119}$/;
+
+/** Safe seasonal/evergreen catalog theme identifier slug. */
+export const THEME_ID_REGEX = /^[a-z0-9][a-z0-9-]{1,63}$/;
 
 // =============================================================================
 // Enum Schemas & Union Types
@@ -97,6 +102,10 @@ export const ImageStatusSchema = z.enum(
   'Nieprawidłowy status ilustracji.',
 );
 export const StorageModeSchema = z.enum(STORAGE_MODES);
+export const GeminiImageSizeSchema = z.enum(
+  GEMINI_IMAGE_SIZES,
+  'Wybierz rozmiar obrazu Gemini: 1K lub 2K.',
+);
 export const AllowedImageMimeSchema = z.enum(
   ALLOWED_IMAGE_MIMES,
   'Dozwolone formaty obrazów to JPEG, PNG oraz WebP.',
@@ -112,6 +121,7 @@ export type GenerationMode = z.infer<typeof GenerationModeSchema>;
 export type GenerationStage = z.infer<typeof GenerationStageSchema>;
 export type ImageStatus = z.infer<typeof ImageStatusSchema>;
 export type StorageMode = z.infer<typeof StorageModeSchema>;
+export type GeminiImageSize = z.infer<typeof GeminiImageSizeSchema>;
 export type AllowedImageMime = z.infer<typeof AllowedImageMimeSchema>;
 
 // =============================================================================
@@ -204,6 +214,7 @@ export interface StoryInput {
   gender: ChildGender;
   companion?: string;
   theme: string;
+  themeId?: string;
   artStyle: ArtStyle;
   mood: StoryMood;
   pageCount: number; // 4..12, default 10
@@ -241,6 +252,7 @@ export interface StoryRecord {
   coverStatus: ImageStatus;
   coverUpdatedAt?: string;
   referencePhotos: string[]; // 0..4 persisted (1..4 enforced on photo upload batch)
+  referencePhotosPurgedAt?: string;
   pages: StoryPage[];
   modelsUsed: {
     textModel: string;
@@ -260,6 +272,8 @@ export interface StorySummary {
   bookFormat: BookFormat;
   pageCount: number;
   coverUrl: string | null;
+  referencePhotosCount: number;
+  referencePhotosPurgedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -270,6 +284,7 @@ export interface RuntimeSettings {
   imageModel: string;
   defaultPreviewFirst: boolean;
   defaultBookFormat: BookFormat;
+  geminiImageSize?: GeminiImageSize;
 }
 
 export interface StoryBlueprint {
@@ -300,6 +315,7 @@ export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
   imageModel: 'gemini-nano-banana-2.1',
   defaultPreviewFirst: false,
   defaultBookFormat: 'square',
+  geminiImageSize: DEFAULT_GEMINI_IMAGE_SIZE,
 };
 
 // =============================================================================
@@ -330,6 +346,20 @@ export const StoryInputSchema = z.object({
     max: 400,
     maxMessage: 'Temat bajki może mieć maksymalnie 400 znaków.',
   }),
+  themeId: z
+    .string()
+    .transform(cleanUserText)
+    .pipe(
+      z
+        .string()
+        .refine(
+          (val) => val.length === 0 || THEME_ID_REGEX.test(val),
+          'Nieprawidłowy identyfikator motywu.',
+        ),
+    )
+    .nullable()
+    .transform((val) => (val && val.length > 0 ? val : undefined))
+    .optional(),
   artStyle: ArtStyleSchema,
   mood: StoryMoodSchema,
   pageCount: z
@@ -442,6 +472,7 @@ export const RuntimeSettingsSchema = z.object({
   imageModel: ModelIdSchema,
   defaultPreviewFirst: z.boolean('Wartość defaultPreviewFirst musi być typu boolean.'),
   defaultBookFormat: BookFormatSchema,
+  geminiImageSize: GeminiImageSizeSchema.optional(),
 });
 
 export const PatchSettingsSchema = RuntimeSettingsSchema.partial().refine(
@@ -482,6 +513,7 @@ export const StoryRecordSchema = z.object({
   coverStatus: ImageStatusSchema,
   coverUpdatedAt: IsoTimestampSchema.optional(),
   referencePhotos: z.array(AssetFilenameSchema).max(MAX_REFERENCE_PHOTOS),
+  referencePhotosPurgedAt: IsoTimestampSchema.optional(),
   pages: z
     .array(StoryPageSchema)
     .min(MIN_PAGE_COUNT)
@@ -511,6 +543,8 @@ export const StorySummarySchema = z.object({
   bookFormat: BookFormatSchema,
   pageCount: z.int().min(MIN_PAGE_COUNT).max(MAX_PAGE_COUNT),
   coverUrl: z.string().min(1).nullable(),
+  referencePhotosCount: z.int().min(0).max(MAX_REFERENCE_PHOTOS),
+  referencePhotosPurgedAt: IsoTimestampSchema.optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });
@@ -550,6 +584,7 @@ export function extractStoryInput(payload: CreateStoryPayload): StoryInput {
     gender: payload.gender,
     ...(payload.companion !== undefined ? { companion: payload.companion } : {}),
     theme: payload.theme,
+    ...(payload.themeId !== undefined ? { themeId: payload.themeId } : {}),
     artStyle: payload.artStyle,
     mood: payload.mood,
     pageCount: payload.pageCount,

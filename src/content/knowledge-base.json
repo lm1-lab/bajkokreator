@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "articles": [
+    {
+      "id": "book-formats-and-specs",
+      "title": "Formaty książek i parametry wydruku PDF",
+      "category": "produkt",
+      "summary": "Dostępne formaty książek (Kwadrat 21×21 cm oraz A4 poziomy) oraz różnica między PDF do domu a PDF poligraficznym ze spadami.",
+      "content": "BajkoKreator przygotowuje spersonalizowane książki w dwóch formatach: Kwadrat 21×21 cm (595,28 × 595,28 pt) oraz A4 poziomy 29,7×21 cm (841,89 × 595,28 pt). Każda bajka ma okładkę, stronę dedykacji ze zdjęciem dziecka, od 4 do 12 ilustrowanych stron opowieści (domyślnie 10) oraz tylną okładkę. Do profesjonalnej drukarni dostępny jest tryb PDF poligraficzny ze spadami 3 mm, znacznikami cięcia poza obszarem spadu oraz automatycznym dopełnieniem stron do wielokrotności 4.",
+      "keywords": ["format", "kwadrat", "a4", "wymiary", "pdf", "spady", "druk", "strony"],
+      "policyStatus": "confirmed",
+      "updatedAt": "2026-11-27T00:00:00.000Z"
+    },
+    {
+      "id": "photo-preparation-guide",
+      "title": "Jak przygotować zdjęcia dziecka do kreatora",
+      "category": "produkt",
+      "summary": "Wymagania dotyczące 1–4 zdjęć referencyjnych dziecka (JPG, PNG, WebP) i rozdzielczości.",
+      "content": "Dodaj od 1 do 4 wyraźnych zdjęć twarzy dziecka w dobrym, naturalnym świetle (formaty JPG, PNG lub WebP, do 5 MB na plik). Przeglądarka automatycznie optymalizuje rozmiar przesyłanych plików. Aby portret na stronie dedykacji był ostry w druku, zalecamy zdjęcie o rozdzielczości co najmniej 800×800 px.",
+      "keywords": ["zdjęcia", "zdjęcie", "portret", "twarz", "rozdzielczość", "jpg", "png", "webp", "przygotować"],
+      "policyStatus": "confirmed",
+      "updatedAt": "2026-11-27T00:00:00.000Z"
+    },
+    {
+      "id": "rodo-privacy-and-photo-deletion",
+      "title": "Ochrona danych (RODO) i usuwanie zdjęć dziecka",
+      "category": "prywatnosc-rodo",
+      "summary": "Jak działają prawa RODO oraz jak jednym kliknięciem usunąć zdjęcia referencyjne dziecka po utworzeniu bajki.",
+      "content": "Zdjęcia referencyjne dziecka służą wyłącznie do przygotowania spersonalizowanej bajki oraz ramki dedykacji. Możesz usunąć przesłane zdjęcia dziecka w dowolnym momencie w podglądzie bajki (przycisk RODO w czytniku) lub automatycznie po zakończeniu realizacji zamówienia. Usunięcie zdjęć referencyjnych nie kasuje wygenerowanych ilustracji ani tekstu bajki. W sprawach formalnych wniosków RODO (kopia danych, całkowite usunięcie konta/zamówień) zgłoszenie jest przekazywane bezpośrednio do administratora.",
+      "keywords": ["rodo", "gdpr", "prywatność", "usuwanie", "zdjęcia", "dane osobowe", "bezpieczeństwo"],
+      "policyStatus": "confirmed",
+      "updatedAt": "2026-11-27T00:00:00.000Z"
+    },
+    {
+      "id": "editing-text-and-illustrations",
+      "title": "Edycja tekstu stron i podmiana ilustracji",
+      "category": "kreator",
+      "summary": "Możesz poprawić treść każdej strony oraz wgrać własną ilustrację przed zatwierdzeniem książki do druku.",
+      "content": "Na stronie podglądu bajki (/story/[id]) możesz edytować treść i tytuł rozdziału dowolnej strony, a także wgrać własną ilustrację (JPG/PNG/WebP) w miejsce okładki lub wybranej strony. Po każdej zmianie uruchom ponownie kontrolę Pre-Flight przed wysłaniem książki do druku.",
+      "keywords": ["edycja", "poprawki", "tekst", "ilustracja", "podmiana", "pre-flight"],
+      "policyStatus": "confirmed",
+      "updatedAt": "2026-11-27T00:00:00.000Z"
+    },
+    {
+      "id": "order-status-and-approval",
+      "title": "Sprawdzanie statusu zamówienia i zatwierdzanie do druku",
+      "category": "zamowienia",
+      "summary": "Jak sprawdzić aktualny status zamówienia numerem BK-RRRR-XXXXXX i jak działa akceptacja przed drukiem.",
+      "content": "Status zamówienia sprawdzisz na stronie /orders lub w sekcji Pomoc (/pomoc), podając numer zamówienia (np. BK-2026-XXXXXX) oraz adres e-mail albo kod pocztowy z adresu dostawy. Żadna książka nie trafia do drukarni bez opłacenia zamówienia, Twojego wyraźnego zatwierdzenia podglądu oraz pozytywnego wyniku kontroli technicznej Pre-Flight.",
+      "keywords": ["status", "zamówienie", "śledzenie", "przesyłka", "akceptacja", "zatwierdzenie", "tracking"],
+      "policyStatus": "confirmed",
+      "updatedAt": "2026-11-27T00:00:00.000Z"
+    },
+    {
+      "id": "seasonal-themes-and-holidays",
+      "title": "Motywy świąteczne i okazjonalne",
+      "category": "produkt",
+      "summary": "Katalog inspiracji automatycznie dopasowuje motywy do pór roku i polskich świąt rodzinnych.",
+      "content": "Kreator prezentuje aktualne motywy sezonowe (m.in. Święta i Mikołajki, Dzień Babci i Dziadka, Ferie Zimowe, Wielkanoc, Dzień Dziecka, Wakacje, Jesień) obok 6 całorocznych klasyków. Możesz także rozwinąć pełny katalog motywów albo wpisać dowolny własny pomysł na fabułę.",
+      "keywords": ["święta", "sezonowe", "mikołajki", "wielkanoc", "dzień dziecka", "prezent", "motywy"],
+      "policyStatus": "confirmed",
+      "updatedAt": "2026-11-27T00:00:00.000Z"
+    },
+    {
+      "id": "shipping-and-production-times",
+      "title": "Czas druku, dostawy i ceny wysyłki",
+      "category": "dostawa",
+      "summary": "Informacja o szacowanym czasie produkcji książki drukowanej (ostateczne SLA i cennik zależą od wybranej drukarni).",
+      "content": "Szczegółowy cennik druku, przewoźnicy (np. kurier / paczkomaty) oraz wiążące terminy gwarantowanej dostawy przed świętami zostaną potwierdzone po finalnym wyborze partnera drukarskiego. Do tego czasu zamówienia w trybie szkicu służą do przygotowania specyfikacji i weryfikacji Pre-Flight.",
+      "keywords": ["dostawa", "wysyłka", "czas", "kurier", "paczkomat", "cena", "termin"],
+      "policyStatus": "tbd_business_decision",
+      "updatedAt": "2026-11-27T00:00:00.000Z"
+    },
+    {
+      "id": "returns-reprints-and-refunds",
+      "title": "Reklamacje uszkodzonego druku i zwroty środków",
+      "category": "reklamacje",
+      "summary": "Zasady obsługi reklamacji książek personalizowanych oraz przekazywania wniosków o zwrot do opiekuna.",
+      "content": "Wszystkie zgłoszenia dotyczące uszkodzonej przesyłki, wad druku lub prośby o zwrot środków są automatycznie oznaczane jako priorytetowe i przekazywane bezpośrednio do człowieka (administratora sklepu). Finalny regulamin zwrotów i dodruków reklamacyjnych zostanie opublikowany przed uruchomieniem płatności produkcyjnych.",
+      "keywords": ["zwrot", "reklamacja", "uszkodzona", "dodruk", "pieniądze", "regulamin"],
+      "policyStatus": "tbd_business_decision",
+      "updatedAt": "2026-11-27T00:00:00.000Z"
+    }
+  ]
+}

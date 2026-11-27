@@ -13,6 +13,12 @@ Generator spersonalizowanych 10-stronicowych ilustrowanych bajek dla dzieci po p
   3. `gemini-api` (`@google/genai`) — `gemini-3.8-flash` (strukturalny JSON + Biblia Postaci) oraz `gemini-nano-banana-2.1` / `gemini-3-pro-image` (twarz ze zdjęć referencyjnych + okładka jako kotwica stylu dla stron 2–10), twardy dzienny limit `MAX_DAILY_IMAGE_GENERATIONS=30` i brak ponowień przy `400/402/403`.
   4. `google-subscription` (`src/lib/ai/subscription-adapter.ts`) — wydzielony adapter z `AuthStrategy` (`api_key` | `subscription_oauth_stub`) przygotowany pod planowane otwarcie płatnych subskrypcji Google AI Pro/Ultra (~2 grudnia 2026).
 - **Biblioteka (`/library`) i Ustawienia (`/settings`):** półka z zapisanymi bajkami, szybkie pobieranie PDF, dwustopniowe usuwanie, licznik dziennej puli obrazów i status zapisu (`data/` lokalnie z automatycznym fallbackiem do `/tmp` na Vercel).
+- **Fundament pod druk, obsługę klienta i system agentyczny (niezależny od dostawców):**
+  - **Bezpieczeństwo i operacje (`/api/health`, `/api/ops/summary`, `/api/ops/retention/sweep`):** jednolity format błędów z `X-Request-Id`, strukturalny logger z maskowaniem PII, port `OperatorAuthGuard`, `RateLimiter`, magistrala zdarzeń `DomainEventBus` + JSONL oraz automatyczny sweep retencji RODO (`npm run retention:sweep`).
+  - **Katalog sezonowych motywów i walidacja (`src/content/themes.json`, `/api/catalog/{themes,validate,drafts}`):** 100% całoroczne pokrycie polskich pór roku i świąt (strefa `Europe/Warsaw`), walidator redakcyjny z syntetycznym pre-flightem, nieinwazyjna poczekalnia szkiców i CLI `npm run catalog:validate`.
+  - **Pre-flight i PDF poligraficzny (`/api/stories/[id]/preflight`, `/api/stories/[id]/pdf`):** wspólna specyfikacja geometrii (`src/lib/pdf/layout-spec.ts`), weryfikacja DPI okładki/stron/portretu dedykacji, spady 3 mm, `TrimBox`/`BleedBox`, znaczniki cięcia poza `BleedBox`, tryby POD (`combined` / `interior` / `cover-wrap`) oraz dopełnienie stron do wielokrotności 4.
+  - **Zamówienia, idempotencja, webhooki i manifest druku (`/api/orders/*`, `/orders`):** port `OrderRepository` z optymistycznym wersjonowaniem, twarde allowlisty aktorów, limit zwrotów dla agentów (domyślnie `0 gr`), `IdempotencyStore`, weryfikator HMAC-SHA256 webhooków, SHA-256 `PrintJobManifest` oraz adaptery Dry-Run.
+  - **Obsługa klienta i baza wiedzy (`/pomoc`, `/api/support/{kb,order-status,inquiries}`):** polska baza wiedzy (`src/content/knowledge-base.json`), weryfikowane sprawdzanie statusu zamówienia bez wycieku PII, obowiązkowa eskalacja (zwroty, reklamacje, RODO, chargeback/UOKiK) i automatyczna redakcja PII w zgłoszeniach.
 
 ## Uruchomienie lokalne
 
@@ -28,6 +34,7 @@ Aplikacja uruchomi się domyślnie w **Trybie Demo** (nie wymaga żadnych kluczy
 ```bash
 npm run lint
 npm run typecheck
+npm run catalog:validate
 npm test
 npm run build
 npm run test:e2e

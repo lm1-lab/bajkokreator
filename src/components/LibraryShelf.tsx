@@ -130,8 +130,27 @@ export function LibraryShelf({ initialStories, storageMode }: LibraryShelfProps)
                   <span className="badge badge-gold">
                     {story.childName} • {formatAgeYears(story.childAge)}
                   </span>
-                  <span className="badge">{story.pageCount} stron</span>
-                  <span className="badge">{story.provider}</span>
+                  <span className="badge">
+                    {story.pageCount === 1
+                      ? '1 strona'
+                      : story.pageCount % 10 >= 2 &&
+                          story.pageCount % 10 <= 4 &&
+                          !(story.pageCount % 100 >= 12 && story.pageCount % 100 <= 14)
+                        ? `${story.pageCount} strony`
+                        : `${story.pageCount} stron`}
+                  </span>
+                  <span className="badge">
+                    {story.provider === 'demo'
+                      ? 'Tryb Demo'
+                      : story.provider === 'manual'
+                        ? 'Tryb Ręczny'
+                        : story.provider === 'gemini-api'
+                          ? 'Gemini API'
+                          : 'Subskrypcja Google AI'}
+                  </span>
+                  {story.referencePhotosPurgedAt && (
+                    <span className="badge badge-sage">RODO: zdjęcia usunięte</span>
+                  )}
                 </div>
 
                 <h2 style={{ fontSize: '1.15rem' }}>{story.title}</h2>

@@ -441,6 +441,9 @@
 }
 
 .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 7px 12px;
   border-radius: 999px;
   border: 1px solid var(--rule-strong);
@@ -455,6 +458,24 @@
   border-color: var(--terracotta);
   color: var(--terracotta-dark);
   background: var(--terracotta-soft);
+}
+
+.chip--seasonal {
+  border-color: var(--gold);
+  background: var(--paper-alt, #f4eee2);
+  color: var(--ink);
+}
+
+.chip-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--terracotta);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 /* Art Style Cards & Mood Pills */
@@ -1159,3 +1180,142 @@
     text-align: center;
   }
 }
+
+/* ---------- M6: Seasonal Toggle, Pre-Flight, RODO, Orders & Help Center ---------- */
+
+.chip.is-active {
+  border-color: var(--terracotta);
+  background: var(--terracotta-soft);
+  color: var(--terracotta-dark);
+}
+
+.chip--toggle {
+  border-style: dashed;
+  background: transparent;
+}
+
+.rodo-privacy-note {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--rule);
+  background: var(--paper-alt);
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.badge-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: rgba(165, 48, 40, 0.35);
+}
+
+.preflight-badge-btn {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.preflight-issue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.preflight-issue {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.preflight-issue--error {
+  border-color: rgba(165, 48, 40, 0.4);
+  background: var(--danger-soft);
+}
+
+.preflight-issue--warning {
+  border-color: var(--gold);
+  background: var(--gold-soft);
+}
+
+.preflight-issue-jump {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.preflight-issue-tag {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(38, 30, 24, 0.08);
+}
+
+.rodo-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--rule);
+  background: var(--paper-card);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.kb-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.kb-card {
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.status-card {
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--sage);
+  background: var(--sage-soft);
+}
+
+.order-timeline {
+  margin: 10px 0 0 18px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 0.84rem;
+}
+
+@media (max-width: 720px) {
+  .form-grid,
+  .kb-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

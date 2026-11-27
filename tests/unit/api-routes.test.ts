@@ -15,6 +15,8 @@ import { POST as continueStoryRoute } from '@/app/api/stories/[id]/continue/rout
 import { POST as uploadIllustrationRoute } from '@/app/api/stories/[id]/illustrations/[slot]/route';
 import { PATCH as patchPageRoute } from '@/app/api/stories/[id]/pages/[pageNumber]/route';
 import { GET as getPdfRoute } from '@/app/api/stories/[id]/pdf/route';
+import { GET as getPreflightRoute } from '@/app/api/stories/[id]/preflight/route';
+import { DELETE as purgeReferencePhotosRoute } from '@/app/api/stories/[id]/reference-photos/route';
 import { resetStorageRootCache } from '@/lib/storage/paths';
 import type { StoryRecord } from '@/lib/types/story';
 
@@ -181,6 +183,57 @@ describe('API Routes integration', () => {
     expect(pdfRes.headers.get('x-content-type-options')).toBe('nosniff');
     const pdfBytes = new Uint8Array(await pdfRes.arrayBuffer());
     expect(Buffer.from(pdfBytes.slice(0, 5)).toString('ascii')).toBe('%PDF-');
+
+    // Run preflight check via API
+    const preflightRes = await getPreflightRoute(
+      new Request(`http://localhost/api/stories/${story.id}/preflight?format=square`),
+      { params: Promise.resolve({ id: story.id }) },
+    );
+    expect(preflightRes.status).toBe(200);
+    const preflightJson = (await preflightRes.json()) as {
+      report: { storyId: string; metrics: { totalPdfPages: number } };
+    };
+    expect(preflightJson.report.storyId).toBe(story.id);
+    expect(preflightJson.report.metrics.totalPdfPages).toBe(13);
+
+    // Download print-ready PDF with 3mm bleed, crop marks, and multiple-of-4 padding
+    const printPdfRes = await getPdfRoute(
+      new Request(
+        `http://localhost/api/stories/${story.id}/pdf?format=square&bleedMm=3&cropMarks=true&padToMultipleOf4=true`,
+      ),
+      { params: Promise.resolve({ id: story.id }) },
+    );
+    expect(printPdfRes.status).toBe(200);
+    expect(printPdfRes.headers.get('content-disposition')).toContain('-print-3mm.pdf');
+
+    // Reject out-of-range bleedMm
+    const badBleedRes = await getPdfRoute(
+      new Request(`http://localhost/api/stories/${story.id}/pdf?format=square&bleedMm=25`),
+      { params: Promise.resolve({ id: story.id }) },
+    );
+    expect(badBleedRes.status).toBe(400);
+
+    // GDPR/RODO purge of child reference photos (keeps story intact, deletes ref-1.jpg)
+    const purgeRes = await purgeReferencePhotosRoute(
+      new Request(`http://localhost/api/stories/${story.id}/reference-photos`, {
+        method: 'DELETE',
+      }),
+      { params: Promise.resolve({ id: story.id }) },
+    );
+    expect(purgeRes.status).toBe(200);
+    const purgeJson = (await purgeRes.json()) as {
+      purged: boolean;
+      deletedFiles: string[];
+      purgedAt: string;
+    };
+    expect(purgeJson.purged).toBe(true);
+    expect(purgeJson.deletedFiles).toEqual(['ref-1.jpg']);
+
+    const purgedRefAsset = await getAssetRoute(
+      new Request(`http://localhost/api/stories/${story.id}/assets/ref-1.jpg`),
+      { params: Promise.resolve({ id: story.id, filename: 'ref-1.jpg' }) },
+    );
+    expect(purgedRefAsset.status).toBe(404);
 
     // Delete story
     const delRes = await deleteStoryRoute(

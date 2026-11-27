@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { handleApiError } from '@/lib/api-helpers';
+import {
+  errorResponse,
+  getOrCreateRequestId,
+  handleApiError,
+} from '@/lib/api-helpers';
 import {
   assertValidAssetFilename,
   assertValidStoryId,
@@ -14,9 +18,10 @@ interface RouteContext {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: RouteContext,
 ): Promise<NextResponse> {
+  const requestId = getOrCreateRequestId(request);
   try {
     const { id, filename } = await context.params;
     const safeId = assertValidStoryId(id);
@@ -24,11 +29,16 @@ export async function GET(
 
     const asset = await readStoryAsset(safeId, safeFilename);
     if (!asset) {
-      return NextResponse.json(
-        { error: 'Nie znaleziono żądanego pliku obrazu.', code: 'ASSET_NOT_FOUND' },
-        { status: 404 },
-      );
+      return errorResponse({
+        error: 'Nie znaleziono żądanego pliku obrazu.',
+        code: 'ASSET_NOT_FOUND',
+        status: 404,
+        requestId,
+      });
     }
+
+    // GDPR/RODO hygiene: never allow browsers or shared caches to retain child reference photos
+    const isReferencePhoto = /^ref-/i.test(safeFilename);
 
     return new NextResponse(new Uint8Array(asset.buffer), {
       status: 200,
@@ -36,10 +46,11 @@ export async function GET(
         'Content-Type': asset.mimeType,
         'Content-Length': String(asset.buffer.byteLength),
         'X-Content-Type-Options': 'nosniff',
-        'Cache-Control': 'private, max-age=300',
+        'Cache-Control': isReferencePhoto ? 'no-store' : 'private, max-age=300',
+        'X-Request-Id': requestId,
       },
     });
   } catch (err) {
-    return handleApiError(err);
+    return handleApiError(err, requestId);
   }
 }

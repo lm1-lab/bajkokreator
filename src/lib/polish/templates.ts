@@ -15,6 +15,7 @@ import {
   getPolishForms,
   normalizeCompanion,
 } from '@/lib/polish/inflection';
+import { getEvergreenThemes } from '@/lib/catalog/themes';
 import {
   ART_STYLE_META,
   STORY_MOOD_META,
@@ -26,7 +27,7 @@ import {
 export { ART_STYLE_META, STORY_MOOD_META };
 
 // =============================================================================
-// Theme Inspirations (6 Polish Story Ideas Mapped to Canonical StoryMood)
+// Theme Inspirations (Backed by data-driven src/content/themes.json catalog)
 // 100% browser-safe (zero node:* imports)
 // =============================================================================
 
@@ -37,44 +38,14 @@ export interface ThemeInspiration {
   readonly suggestedMood: StoryMood;
 }
 
-export const THEME_INSPIRATIONS: ReadonlyArray<ThemeInspiration> = [
-  {
-    id: 'lantern-forest',
-    label: 'Las Złotych Latarni',
-    theme: 'wyprawa do zaczarowanego lasu złotych latarni i poszukiwanie zagubionego klucza do krainy bajek',
-    suggestedMood: 'magical-adventure',
-  },
-  {
-    id: 'cloud-balloon',
-    label: 'Balon ponad chmurami',
-    theme: 'podróż kolorowym balonem ponad miękkimi chmurami w poszukiwaniu tęczowej wyspy marzeń',
-    suggestedMood: 'funny-playful',
-  },
-  {
-    id: 'secret-bakery',
-    label: 'Cukiernia Leśnych Skrzatów',
-    theme: 'odkrycie ukrytej cukierni leśnych skrzatów i upieczenie ciasta o smaku śmiechu i przyjaźni',
-    suggestedMood: 'warm-cozy',
-  },
-  {
-    id: 'starlight-train',
-    label: 'Pociąg do Krainy Snów',
-    theme: 'nocna podróż cichym pociągiem wśród srebrnych gwiazd ku spokojnej przystani dobrych snów',
-    suggestedMood: 'bedtime-calm',
-  },
-  {
-    id: 'coral-lighthouse',
-    label: 'Tajemnica Latarni Morskiej',
-    theme: 'wielka morska przygoda w starej latarni i odnalezienie zaginionej mapy śpiewających muszelek',
-    suggestedMood: 'magical-adventure',
-  },
-  {
-    id: 'clockwork-garden',
-    label: 'Ogród Motyli z Papieru',
-    theme: 'spacer po tajemniczym ogrodzie, w którym origami budzi się do życia i uczy odwagi oraz dobroci',
-    suggestedMood: 'warm-cozy',
-  },
-];
+export const THEME_INSPIRATIONS: ReadonlyArray<ThemeInspiration> = getEvergreenThemes().map(
+  (item) => ({
+    id: item.id,
+    label: item.label,
+    theme: item.theme,
+    suggestedMood: item.suggestedMood,
+  }),
+);
 
 // =============================================================================
 // 12-Beat Narrative Architecture & Arc-Aware Demo Plate Mapping (1..12 Pages)

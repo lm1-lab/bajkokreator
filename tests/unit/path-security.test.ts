@@ -6,10 +6,15 @@ import { getStorageRoot, resetStorageRootCache } from '@/lib/storage/paths';
 import {
   DEFAULT_DAILY_IMAGE_LIMIT,
   QuotaExceededError,
+  checkDailyQuotaAvailable,
   getDailyImageLimit,
   getDailyQuotaStatus,
+  getQuotaRepository,
   releaseDailyQuota,
   reserveDailyQuota,
+  resetQuotaRepository,
+  setQuotaRepository,
+  type QuotaRepository,
 } from '@/lib/storage/quota';
 import {
   PathSecurityError,
@@ -42,6 +47,7 @@ const ENV_KEYS = [
   'AI_PROVIDER',
   'GEMINI_TEXT_MODEL',
   'GEMINI_IMAGE_MODEL',
+  'GEMINI_IMAGE_SIZE',
   'DEFAULT_PREVIEW_FIRST',
   'DEFAULT_BOOK_FORMAT',
 ] as const;
@@ -566,10 +572,46 @@ describe('7. Story CRUD, Assets & Runtime Settings (store.ts)', () => {
       imageModel: 'gemini-3-pro-image',
       defaultPreviewFirst: true,
       defaultBookFormat: 'a4-landscape',
+      geminiImageSize: '1K',
     });
 
     // Persisted settings survive reload
     expect(await getRuntimeSettings()).toEqual(updated);
+
+    // Updating geminiImageSize persists and is preserved when patching unrelated fields
+    const with2K = await saveRuntimeSettings({ geminiImageSize: '2K' });
+    expect(with2K.geminiImageSize).toBe('2K');
+    const afterUnrelatedPatch = await saveRuntimeSettings({ defaultBookFormat: 'square' });
+    expect(afterUnrelatedPatch.geminiImageSize).toBe('2K');
+    expect(afterUnrelatedPatch.defaultBookFormat).toBe('square');
+  });
+
+  it('honors GEMINI_IMAGE_SIZE env default and falls back safely to 1K on invalid values', async () => {
+    process.env.GEMINI_IMAGE_SIZE = '2K';
+    expect((await getRuntimeSettings()).geminiImageSize).toBe('2K');
+
+    process.env.GEMINI_IMAGE_SIZE = '8K';
+    expect((await getRuntimeSettings()).geminiImageSize).toBe('1K');
+  });
+
+  it('populates referencePhotosCount and referencePhotosPurgedAt in listStories()', async () => {
+    const purgedAt = '2026-11-26T12:00:00.000Z';
+    await saveStory(makeStoryFixture('story-with-ref', { referencePhotos: ['ref-1.jpg'] }));
+    await saveStory(
+      makeStoryFixture('story-purged', {
+        referencePhotos: [],
+        referencePhotosPurgedAt: purgedAt,
+      }),
+    );
+
+    const listed = await listStories();
+    const withRef = listed.find((s) => s.id === 'story-with-ref');
+    const purged = listed.find((s) => s.id === 'story-purged');
+
+    expect(withRef?.referencePhotosCount).toBe(1);
+    expect(withRef?.referencePhotosPurgedAt).toBeUndefined();
+    expect(purged?.referencePhotosCount).toBe(0);
+    expect(purged?.referencePhotosPurgedAt).toBe(purgedAt);
   });
 });
 
@@ -685,5 +727,47 @@ describe('8. Daily Quota (quota.ts)', () => {
 
     await expect(reserveDailyQuota(1e30)).rejects.toThrow(RangeError);
     await expect(releaseDailyQuota(1e30)).rejects.toThrow(RangeError);
+  });
+
+  it('supports non-mutating checkDailyQuotaAvailable() and vendor-agnostic QuotaRepository DI', async () => {
+    process.env.MAX_DAILY_IMAGE_GENERATIONS = '5';
+    const checkOk = await checkDailyQuotaAvailable(5);
+    expect(checkOk.available).toBe(true);
+    expect(checkOk.status.used).toBe(0);
+
+    const checkOver = await checkDailyQuotaAvailable(6);
+    expect(checkOver.available).toBe(false);
+    // Must not mutate persisted usage
+    expect((await getDailyQuotaStatus()).used).toBe(0);
+
+    const customRepo: QuotaRepository = {
+      kind: 'memory-mock',
+      async getDailyUsage() {
+        return { date: '2026-11-27', used: 2, limit: 10, remaining: 8 };
+      },
+      async checkQuotaAvailable(count) {
+        return {
+          available: 2 + count <= 10,
+          requested: count,
+          status: { date: '2026-11-27', used: 2, limit: 10, remaining: 8 },
+        };
+      },
+      async reserveImageQuota(count) {
+        return { date: '2026-11-27', used: 2 + count, limit: 10, remaining: 8 - count };
+      },
+      async releaseImageQuota() {},
+    };
+
+    try {
+      expect(getQuotaRepository().kind).toBe('filesystem');
+      setQuotaRepository(customRepo);
+      expect(getQuotaRepository().kind).toBe('memory-mock');
+      expect((await getDailyQuotaStatus()).used).toBe(2);
+      expect((await checkDailyQuotaAvailable(9)).available).toBe(false);
+      expect((await reserveDailyQuota(3)).used).toBe(5);
+    } finally {
+      resetQuotaRepository();
+    }
+    expect(getQuotaRepository().kind).toBe('filesystem');
   });
 });

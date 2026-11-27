@@ -1,4 +1,5 @@
 import type { ArtStyle, BookFormat, StoryInput, StoryMood } from '@/lib/types/story';
+import { getThemeById } from '@/lib/catalog/themes';
 import {
   declinePolishName,
   formatAgeAdjective,
@@ -141,12 +142,28 @@ export function buildCoverPrompt(
   const companionCue = companion
     ? ` Beside the child sits their companion (${clampSnippet(companion, 80)}).`
     : '';
+  const catalogTheme = input.themeId ? getThemeById(input.themeId) : undefined;
+  const hints = catalogTheme?.promptHints;
+  const motifCue =
+    hints?.seasonalMotifs && hints.seasonalMotifs.length > 0
+      ? ` Subtle seasonal details: ${hints.seasonalMotifs.join(', ')}.`
+      : '';
+  const wardrobeCue = hints?.wardrobeHint
+    ? ` Child seasonal attire: ${clampSnippet(hints.wardrobeHint, 160)}.`
+    : '';
+  const avoidCue =
+    hints?.avoidMotifs && hints.avoidMotifs.length > 0
+      ? ` Avoid visual elements: ${hints.avoidMotifs.join(', ')}.`
+      : '';
+  const lighting = hints?.lightingOverride
+    ? `${hints.lightingOverride}; ${mood.lightingHint}`
+    : mood.lightingHint;
 
   return finalizePrompt([
     `[STYLE LOCK] ${style.promptLock}.`,
     `[CHARACTER BIBLE] ${clampSnippet(characterBible, 1500)}`,
-    `[SCENE COMPOSITION] Enchanting front-cover key illustration featuring ${clampSnippet(input.childName, 60)} centered in the lower-middle foreground, looking forward with wonder toward the world of "${safeTheme}".${companionCue}${titleHint} Leave open, softly painted atmospheric sky or quiet painterly foliage in the upper third and gentle foreground margin at the bottom for print layout breathing room — do not render any letters or title text in the image.`,
-    `[LIGHTING & MOOD] ${mood.lightingHint}.`,
+    `[SCENE COMPOSITION] Enchanting front-cover key illustration featuring ${clampSnippet(input.childName, 60)} centered in the lower-middle foreground, looking forward with wonder toward the world of "${safeTheme}".${companionCue}${wardrobeCue}${motifCue}${titleHint}${avoidCue} Leave open, softly painted atmospheric sky or quiet painterly foliage in the upper third and gentle foreground margin at the bottom for print layout breathing room — do not render any letters or title text in the image.`,
+    `[LIGHTING & MOOD] ${lighting}.`,
     `[PRINT SAFETY] ${PRINT_SAFETY_CLAUSE}.`,
   ]);
 }
@@ -164,12 +181,21 @@ export function buildPagePrompt(opts: BuildPagePromptOptions): string {
   const { input, characterBible, pageNumber, totalPages, chapterTitle, sceneDescription } = opts;
   const style = ART_STYLE_META[input.artStyle];
   const mood = STORY_MOOD_META[input.mood];
+  const catalogTheme = input.themeId ? getThemeById(input.themeId) : undefined;
+  const hints = catalogTheme?.promptHints;
+  const motifCue =
+    hints?.seasonalMotifs && hints.seasonalMotifs.length > 0
+      ? ` Seasonal atmosphere cues: ${hints.seasonalMotifs.join(', ')}.`
+      : '';
+  const lighting = hints?.lightingOverride
+    ? `${hints.lightingOverride}; ${mood.lightingHint}`
+    : mood.lightingHint;
 
   return finalizePrompt([
     `[STYLE LOCK] ${style.promptLock}. Maintain strict visual, brushwork, color-palette, and character continuity with the front cover illustration and uploaded reference photos.`,
     `[CHARACTER BIBLE] ${clampSnippet(characterBible, 1400)}`,
-    `[SCENE COMPOSITION] Storybook page ${pageNumber} of ${totalPages} ("${clampSnippet(chapterTitle, 120)}"): ${clampSnippet(sceneDescription, 700)}`,
-    `[LIGHTING & MOOD] ${mood.lightingHint}.`,
+    `[SCENE COMPOSITION] Storybook page ${pageNumber} of ${totalPages} ("${clampSnippet(chapterTitle, 120)}"): ${clampSnippet(sceneDescription, 700)}${motifCue}`,
+    `[LIGHTING & MOOD] ${lighting}.`,
     `[PRINT SAFETY] ${PRINT_SAFETY_CLAUSE}.`,
   ]);
 }

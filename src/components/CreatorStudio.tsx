@@ -6,8 +6,12 @@ import { CoverPreview } from '@/components/CoverPreview';
 import type { ProviderStatus } from '@/lib/ai/provider';
 import { compressChildPhoto } from '@/lib/client-image';
 import { estimateClientStoryCost } from '@/lib/cost-estimator';
+import {
+  getAllThemes,
+  getEvergreenThemes,
+  type ThemeCatalogItem,
+} from '@/lib/catalog/themes';
 import { ART_STYLE_META, STORY_MOOD_META } from '@/lib/polish/prompts';
-import { THEME_INSPIRATIONS } from '@/lib/polish/templates';
 import {
   ART_STYLES,
   DEFAULT_PAGE_COUNT,
@@ -36,14 +40,26 @@ interface CreatorStudioProps {
   initialSettings: RuntimeSettings;
   providers: ProviderStatus[];
   quota: DailyQuotaStatus;
+  themeInspirations?: readonly ThemeCatalogItem[];
 }
 
 export function CreatorStudio({
   initialSettings,
   providers,
   quota,
+  themeInspirations,
 }: CreatorStudioProps) {
   const router = useRouter();
+  const activeThemes =
+    themeInspirations && themeInspirations.length > 0
+      ? themeInspirations
+      : getEvergreenThemes();
+  const [showAllThemes, setShowAllThemes] = useState(false);
+  const displayedThemes = useMemo(
+    () => (showAllThemes ? getAllThemes() : activeThemes),
+    [showAllThemes, activeThemes],
+  );
+  const initialThemeItem = activeThemes[0];
 
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -51,9 +67,16 @@ export function CreatorStudio({
   const [childAge, setChildAge] = useState<number>(5);
   const [gender, setGender] = useState<ChildGender>('girl');
   const [companion, setCompanion] = useState('');
-  const [theme, setTheme] = useState(THEME_INSPIRATIONS[0].theme);
-  const [artStyle, setArtStyle] = useState<ArtStyle>('watercolor');
-  const [mood, setMood] = useState<StoryMood>('warm-cozy');
+  const [selectedThemeId, setSelectedThemeId] = useState<string | undefined>(
+    initialThemeItem?.id,
+  );
+  const [theme, setTheme] = useState(initialThemeItem.theme);
+  const [artStyle, setArtStyle] = useState<ArtStyle>(
+    initialThemeItem.suggestedArtStyle ?? 'watercolor',
+  );
+  const [mood, setMood] = useState<StoryMood>(
+    initialThemeItem.suggestedMood ?? 'warm-cozy',
+  );
   const [pageCount, setPageCount] = useState<number>(DEFAULT_PAGE_COUNT);
   const [dedicationFrom, setDedicationFrom] = useState('');
   const [bookFormat, setBookFormat] = useState<BookFormat>(
@@ -169,6 +192,7 @@ export function CreatorStudio({
         gender,
         companion: companion.trim() || undefined,
         theme: trimmedTheme,
+        ...(selectedThemeId ? { themeId: selectedThemeId } : {}),
         artStyle,
         mood,
         pageCount: Number(pageCount),
@@ -232,6 +256,14 @@ export function CreatorStudio({
               Zdjęcia są kompresowane w Twojej przeglądarce przed wysłaniem. Pierwsze zdjęcie
               trafia w ozdobnej ramce na stronę z dedykacją oraz służy jako referencja twarzy
               w trybie Gemini API.
+            </p>
+            <p
+              className="rodo-privacy-note"
+              data-testid="rodo-privacy-notice"
+            >
+              <strong>Ochrona prywatności (RODO):</strong> zdjęcia dziecka służą wyłącznie do
+              stworzenia tej książki i możesz je trwale usunąć jednym kliknięciem w podglądzie
+              bajki po jej wygenerowaniu.
             </p>
 
             <div
@@ -412,25 +444,51 @@ export function CreatorStudio({
                 id="storyTheme"
                 className="field-textarea"
                 value={theme}
-                onChange={(e) => setTheme(e.target.value)}
+                onChange={(e) => {
+                  setTheme(e.target.value);
+                  setSelectedThemeId(undefined);
+                }}
                 data-testid="theme-input"
                 maxLength={400}
               />
               <div className="chips-wrap" aria-label="Gotowe inspiracje tematów">
-                {THEME_INSPIRATIONS.map((insp) => (
-                  <button
-                    key={insp.id}
-                    type="button"
-                    className="chip"
-                    data-testid="inspiration-chip"
-                    onClick={() => {
-                      setTheme(insp.theme);
-                      setMood(insp.suggestedMood);
-                    }}
-                  >
-                    {insp.label}
-                  </button>
-                ))}
+                {displayedThemes.map((insp) => {
+                  const isActiveChip = selectedThemeId === insp.id || theme === insp.theme;
+                  return (
+                    <button
+                      key={insp.id}
+                      type="button"
+                      className={`chip${insp.badge ? ' chip--seasonal' : ''}${isActiveChip ? ' is-active' : ''}`}
+                      aria-pressed={isActiveChip}
+                      data-testid="inspiration-chip"
+                      data-season={insp.season}
+                      onClick={() => {
+                        setSelectedThemeId(insp.id);
+                        setTheme(insp.theme);
+                        setMood(insp.suggestedMood);
+                        if (insp.suggestedArtStyle) {
+                          setArtStyle(insp.suggestedArtStyle);
+                        }
+                      }}
+                    >
+                      {insp.badge ? (
+                        <span className="chip-badge">{insp.badge}</span>
+                      ) : null}
+                      <span>{insp.label}</span>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  className="chip chip--toggle"
+                  data-testid="toggle-all-themes-btn"
+                  aria-expanded={showAllThemes}
+                  onClick={() => setShowAllThemes((prev) => !prev)}
+                >
+                  {showAllThemes
+                    ? 'Pokaż tylko aktualne motywy'
+                    : `Wszystkie sezony (${getAllThemes().length})`}
+                </button>
               </div>
             </div>
 
@@ -576,7 +634,18 @@ export function CreatorStudio({
             <div className="cost-box" data-testid="cost-estimate">
               <div className="cost-row">
                 <span>
-                  <strong>Szacowany koszt teraz</strong> ({costEstimate.imagesNow} obrazów)
+                  <strong>Szacowany koszt teraz</strong> (
+                  {costEstimate.imagesNow === 1
+                    ? '1 obraz'
+                    : costEstimate.imagesNow % 10 >= 2 &&
+                        costEstimate.imagesNow % 10 <= 4 &&
+                        !(
+                          costEstimate.imagesNow % 100 >= 12 &&
+                          costEstimate.imagesNow % 100 <= 14
+                        )
+                      ? `${costEstimate.imagesNow} obrazy`
+                      : `${costEstimate.imagesNow} obrazów`}
+                  )
                 </span>
                 <span className="cost-amount">
                   {costEstimate.isFree
@@ -586,7 +655,20 @@ export function CreatorStudio({
               </div>
               {!costEstimate.isFree && previewFirst && (
                 <div className="cost-row" style={{ fontSize: '0.84rem' }}>
-                  <span>Pełna książka ({costEstimate.totalImagesFullBook} obrazów)</span>
+                  <span>
+                    Pełna książka (
+                    {costEstimate.totalImagesFullBook === 1
+                      ? '1 obraz'
+                      : costEstimate.totalImagesFullBook % 10 >= 2 &&
+                          costEstimate.totalImagesFullBook % 10 <= 4 &&
+                          !(
+                            costEstimate.totalImagesFullBook % 100 >= 12 &&
+                            costEstimate.totalImagesFullBook % 100 <= 14
+                          )
+                        ? `${costEstimate.totalImagesFullBook} obrazy`
+                        : `${costEstimate.totalImagesFullBook} obrazów`}
+                    )
+                  </span>
                   <span>
                     {costEstimate.formattedFullBookPln} ({costEstimate.formattedFullBookUsd})
                   </span>

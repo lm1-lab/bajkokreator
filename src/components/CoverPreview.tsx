@@ -22,6 +22,16 @@ interface CoverPreviewProps {
   photoPreviewUrl: string | null;
 }
 
+function formatPageCountPl(count: number): string {
+  if (count === 1) return '1 strona';
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) {
+    return `${count} strony`;
+  }
+  return `${count} stron`;
+}
+
 export function CoverPreview({
   childName,
   childAge,
@@ -55,7 +65,6 @@ export function CoverPreview({
         </span>
 
         <div className="cover-mockup-art">
-          { }
           <img
             src="/demo-art/cover.jpg"
             alt={`Podgląd ilustracji okładkowej w stylu ${styleMeta.label}`}
@@ -65,7 +74,6 @@ export function CoverPreview({
               className="cover-mockup-child-badge"
               title={`Zdjęcie dziecka: ${displayName}`}
             >
-              { }
               <img src={photoPreviewUrl} alt={`Zdjęcie dziecka ${displayName}`} />
             </span>
           )}
@@ -81,7 +89,7 @@ export function CoverPreview({
         </p>
 
         <div className="cover-mockup-meta">
-          {displayName} ({formatAgeYears(childAge)}) • {pageCount} stron •{' '}
+          {displayName} ({formatAgeYears(childAge)}) • {formatPageCountPl(pageCount)} •{' '}
           {styleMeta.label} • {moodMeta.label} •{' '}
           {bookFormat === 'square' ? 'Kwadrat 21×21 cm' : 'A4 poziomy'}
         </div>

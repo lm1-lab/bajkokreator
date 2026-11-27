@@ -6,6 +6,8 @@ import { usePathname } from 'next/navigation';
 const NAV_ITEMS = [
   { href: '/', label: 'Kreator bajki' },
   { href: '/library', label: 'Biblioteka' },
+  { href: '/orders', label: 'Zamówienia' },
+  { href: '/pomoc', label: 'Pomoc' },
   { href: '/settings', label: 'Ustawienia AI' },
 ] as const;
 
@@ -36,6 +38,7 @@ export function HeaderNav() {
                 key={item.href}
                 href={item.href}
                 className={`atelier-nav-link${isActive ? ' is-active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
               >
                 {item.label}
               </Link>

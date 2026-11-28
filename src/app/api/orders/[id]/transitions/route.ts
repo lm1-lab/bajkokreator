@@ -11,10 +11,12 @@ import {
   OrderActorSchema,
   OrderStatusSchema,
   ShippingAddressSchema,
+  resolveAuthorizedOrderActor,
   transitionOrder,
 } from '@/lib/orders/lifecycle';
 import { getOrderByIdOrNumber, getOrderRepository } from '@/lib/orders/repository';
 import { requireOperatorAuth } from '@/lib/security/operator-guard';
+import { parseJsonBodyWithLimit } from '@/lib/security/rate-limit';
 import { getStory } from '@/lib/storage/store';
 
 export const runtime = 'nodejs';
@@ -43,7 +45,7 @@ const TransitionBodySchema = z
   .object({
     nextStatus: OrderStatusSchema.optional(),
     to: OrderStatusSchema.optional(),
-    actor: OrderActorSchema,
+    actor: OrderActorSchema.optional(),
     expectedVersion: z.number().int().min(1).optional(),
     reason: z.string().trim().max(400).optional(),
     patch: TransitionPatchSchema,
@@ -58,7 +60,7 @@ export async function POST(
 ): Promise<NextResponse> {
   const requestId = getOrCreateRequestId(request);
   try {
-    await requireOperatorAuth(request, ['admin', 'agent']);
+    const identity = await requireOperatorAuth(request, ['admin', 'agent']);
     const { id } = await context.params;
     const order = await getOrderByIdOrNumber(id);
     if (!order) {
@@ -70,9 +72,10 @@ export async function POST(
       });
     }
 
-    const rawBody: unknown = await request.json();
+    const rawBody = await parseJsonBodyWithLimit(request, 64 * 1024);
     const body = TransitionBodySchema.parse(rawBody);
     const targetStatus = (body.nextStatus ?? body.to)!;
+    const effectiveActor = resolveAuthorizedOrderActor(identity, body.actor);
 
     let currentStoryUpdatedAt: string | undefined;
     if (targetStatus === 'submitted_to_printer') {
@@ -82,7 +85,7 @@ export async function POST(
 
     const prevStatus = order.status;
     const transitioned = transitionOrder(order, targetStatus, {
-      actor: body.actor,
+      actor: effectiveActor,
       ...(body.reason !== undefined ? { reason: body.reason } : {}),
       ...(body.expectedVersion !== undefined ? { expectedVersion: body.expectedVersion } : {}),
       ...(currentStoryUpdatedAt ? { currentStoryUpdatedAt } : {}),

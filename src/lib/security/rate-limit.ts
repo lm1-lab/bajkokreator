@@ -206,6 +206,9 @@ export const ROUTE_RATE_LIMITS = {
   settingsPatch: { bucket: 'settings:patch', limit: 60, windowSeconds: 60 },
   opsRetentionSweep: { bucket: 'ops:retention-sweep', limit: 60, windowSeconds: 60 },
   opsSummary: { bucket: 'ops:summary', limit: 60, windowSeconds: 60 },
+  ordersCreate: { bucket: 'orders:create', limit: 60, windowSeconds: 60 },
+  supportOrderStatus: { bucket: 'support:order-status', limit: 30, windowSeconds: 60 },
+  supportInquiries: { bucket: 'support:inquiries', limit: 20, windowSeconds: 60 },
 } as const satisfies Record<string, RouteRateLimitPolicy>;
 
 export async function enforceRateLimit(

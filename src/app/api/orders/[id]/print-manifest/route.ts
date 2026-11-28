@@ -6,7 +6,7 @@ import {
   jsonResponse,
 } from '@/lib/api-helpers';
 import { buildPrintJobManifest } from '@/lib/orders/fulfillment';
-import { getOrderByIdOrNumber, getOrderRepository } from '@/lib/orders/repository';
+import { getOrderByIdOrNumber } from '@/lib/orders/repository';
 import { PdfLayoutModeSchema } from '@/lib/pdf/layout-spec';
 import { requireOperatorAuth } from '@/lib/security/operator-guard';
 import { getStory } from '@/lib/storage/store';
@@ -54,19 +54,7 @@ export async function GET(
       layoutMode,
     });
 
-    if (order.printManifestDigest !== digest) {
-      await getOrderRepository()
-        .saveOrder(
-          {
-            ...order,
-            printManifestDigest: digest,
-          },
-          order.version,
-        )
-        .catch(() => undefined);
-    }
-
-    return jsonResponse({ manifest }, { status: 200, requestId });
+    return jsonResponse({ manifest, digest }, { status: 200, requestId });
   } catch (err) {
     return handleApiError(err, requestId);
   }

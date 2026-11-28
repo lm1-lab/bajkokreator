@@ -279,6 +279,59 @@ export function computeCustomerLookupHash(email: string, postalCode?: string): s
     .digest('hex');
 }
 
+export const ORDER_UNIT_PRICE_MINOR_UNITS: Readonly<
+  Record<OrderRecord['bookFormat'], number>
+> = {
+  square: 12900,
+  'a4-landscape': 14900,
+};
+
+/**
+ * Deterministic server-side pricing calculation in minor units (grosze PLN).
+ * Public order creation must never trust client-supplied prices.
+ */
+export function calculateOrderTotalMinorUnits(
+  bookFormat: OrderRecord['bookFormat'],
+  quantity: number,
+): number {
+  const safeQuantity = Math.max(1, Math.min(100, Math.floor(quantity)));
+  return ORDER_UNIT_PRICE_MINOR_UNITS[bookFormat] * safeQuantity;
+}
+
+/**
+ * Derives the authoritative OrderActor from an authenticated OperatorIdentity
+ * so a lower-privileged `agent` token can never spoof `admin`, `customer`, or
+ * webhook actors via the request body.
+ */
+export function resolveAuthorizedOrderActor(
+  identity: { id: string; role: 'admin' | 'agent' | 'ops-readonly' },
+  requestedActor?: OrderActor,
+): OrderActor {
+  if (identity.role === 'agent') {
+    if (requestedActor && requestedActor.kind !== 'agent') {
+      throw new OrderGuardrailError(
+        `Token o roli "agent" nie może podszywać się pod aktora typu "${requestedActor.kind}".`,
+        'AGENT_FORBIDDEN_ACTION',
+        403,
+      );
+    }
+    return {
+      kind: 'agent',
+      id: requestedActor?.id ?? identity.id,
+    };
+  }
+
+  if (identity.role === 'admin') {
+    return requestedActor ?? { kind: 'admin', id: identity.id };
+  }
+
+  throw new OrderGuardrailError(
+    `Rola "${identity.role}" nie ma uprawnień do wykonywania zmian na zamówieniach.`,
+    'FORBIDDEN_ACTOR',
+    403,
+  );
+}
+
 export function canTransitionOrder(from: OrderStatus, to: OrderStatus): boolean {
   return ALLOWED_ORDER_TRANSITIONS[from].includes(to);
 }

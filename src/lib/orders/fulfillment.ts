@@ -324,6 +324,28 @@ export class DryRunPaymentAdapter implements PaymentAdapter {
   }
 }
 
+const fulfillmentLocks = new Map<string, Promise<void>>();
+
+async function withFulfillmentLock<T>(orderId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = fulfillmentLocks.get(orderId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = prev.catch(() => undefined).then(() => current);
+  fulfillmentLocks.set(orderId, tail);
+
+  await prev.catch(() => undefined);
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (fulfillmentLocks.get(orderId) === tail) {
+      fulfillmentLocks.delete(orderId);
+    }
+  }
+}
+
 export class OrderFulfillmentService {
   private readonly printAdapter: PrintFulfillmentAdapter;
 
@@ -336,63 +358,78 @@ export class OrderFulfillmentService {
     actor?: OrderActor;
     pdfUrlOrKey?: string;
   }): Promise<{ order: OrderRecord; manifest: PrintJobManifest; submission: PrintSubmissionResult }> {
-    const repo = getOrderRepository();
-    const order = await repo.getOrder(params.orderId);
-    if (!order) {
-      throw new OrderGuardrailError(
-        `Nie znaleziono zamówienia ${params.orderId}.`,
-        'INVALID_TRANSITION',
-        409,
-      );
-    }
+    return withFulfillmentLock(params.orderId, async () => {
+      const repo = getOrderRepository();
+      const order = await repo.getOrder(params.orderId);
+      if (!order) {
+        throw new OrderGuardrailError(
+          `Nie znaleziono zamówienia ${params.orderId}.`,
+          'INVALID_TRANSITION',
+          409,
+        );
+      }
 
-    const story = await getStory(order.storyId);
-    if (!story) {
-      throw new OrderGuardrailError(
-        `Nie znaleziono bajki ${order.storyId}.`,
-        'PREFLIGHT_REQUIRED',
-        409,
-      );
-    }
+      const story = await getStory(order.storyId);
+      if (!story) {
+        throw new OrderGuardrailError(
+          `Nie znaleziono bajki ${order.storyId}.`,
+          'PREFLIGHT_REQUIRED',
+          409,
+        );
+      }
 
-    const { manifest, digest } = await buildPrintJobManifest(order, story);
-    const submission = await this.printAdapter.submitPrintJob({
-      orderId: order.id,
-      storyId: order.storyId,
-      bookFormat: order.bookFormat,
-      quantity: order.quantity,
-      pdfUrlOrKey:
-        params.pdfUrlOrKey ??
-        `/api/stories/${order.storyId}/pdf?format=${order.bookFormat}&bleedMm=3&cropMarks=true&padToMultipleOf4=true`,
-      shippingAddress: manifest.shippingAddress,
-      idempotencyKey: manifest.idempotencyKey,
+      const actor: OrderActor = params.actor ?? {
+        kind: 'system',
+        id: 'order-fulfillment-service',
+      };
+
+      // Pre-validate state machine transition & actor guardrails BEFORE any external
+      // printer side effect so an invalid status or forbidden actor never submits a job.
+      transitionOrder(order, 'submitted_to_printer', {
+        actor,
+        expectedVersion: order.version,
+        currentStoryUpdatedAt: story.updatedAt,
+      });
+
+      const { manifest, digest } = await buildPrintJobManifest(order, story);
+      const submission = await this.printAdapter.submitPrintJob({
+        orderId: order.id,
+        storyId: order.storyId,
+        bookFormat: order.bookFormat,
+        quantity: order.quantity,
+        pdfUrlOrKey:
+          params.pdfUrlOrKey ??
+          `/api/stories/${order.storyId}/pdf?format=${order.bookFormat}&bleedMm=3&cropMarks=true&padToMultipleOf4=true`,
+        shippingAddress: manifest.shippingAddress,
+        idempotencyKey: manifest.idempotencyKey,
+      });
+
+      const prevStatus = order.status;
+      const transitioned = transitionOrder(order, 'submitted_to_printer', {
+        actor,
+        reason: `Zlecono druk u dostawcy ${submission.providerId} (${submission.externalOrderId})`,
+        expectedVersion: order.version,
+        currentStoryUpdatedAt: story.updatedAt,
+        patch: {
+          printManifestDigest: digest,
+          printProviderId: submission.providerId,
+          printExternalOrderId: submission.externalOrderId,
+        },
+      });
+
+      const saved = await repo.saveOrder(transitioned, order.version);
+
+      await getDomainEventBus().publish({
+        type: 'order.status_changed',
+        occurredAt: saved.updatedAt,
+        orderId: saved.id,
+        storyId: saved.storyId,
+        from: prevStatus,
+        to: saved.status,
+        order: saved,
+      });
+
+      return { order: saved, manifest, submission };
     });
-
-    const prevStatus = order.status;
-    const transitioned = transitionOrder(order, 'submitted_to_printer', {
-      actor: params.actor ?? { kind: 'system', id: 'order-fulfillment-service' },
-      reason: `Zlecono druk u dostawcy ${submission.providerId} (${submission.externalOrderId})`,
-      expectedVersion: order.version,
-      currentStoryUpdatedAt: story.updatedAt,
-      patch: {
-        printManifestDigest: digest,
-        printProviderId: submission.providerId,
-        printExternalOrderId: submission.externalOrderId,
-      },
-    });
-
-    const saved = await repo.saveOrder(transitioned, order.version);
-
-    await getDomainEventBus().publish({
-      type: 'order.status_changed',
-      occurredAt: saved.updatedAt,
-      orderId: saved.id,
-      storyId: saved.storyId,
-      from: prevStatus,
-      to: saved.status,
-      order: saved,
-    });
-
-    return { order: saved, manifest, submission };
   }
 }

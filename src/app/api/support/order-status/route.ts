@@ -6,6 +6,11 @@ import {
   jsonResponse,
 } from '@/lib/api-helpers';
 import {
+  ROUTE_RATE_LIMITS,
+  enforceRateLimit,
+  parseJsonBodyWithLimit,
+} from '@/lib/security/rate-limit';
+import {
   OrderStatusLookupInputSchema,
   lookupCustomerOrderStatus,
 } from '@/lib/support/order-lookup';
@@ -16,7 +21,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request): Promise<NextResponse> {
   const requestId = getOrCreateRequestId(request);
   try {
-    const rawBody: unknown = await request.json();
+    await enforceRateLimit(request, ROUTE_RATE_LIMITS.supportOrderStatus);
+    const rawBody = await parseJsonBodyWithLimit(request, 16 * 1024);
     const input = OrderStatusLookupInputSchema.parse(rawBody);
     const statusView = await lookupCustomerOrderStatus(input);
 

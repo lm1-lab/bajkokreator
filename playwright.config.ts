@@ -95,6 +95,12 @@ const playwrightConfig = defineConfig({
           timeout: 120_000,
           env: {
             BAJKOKREATOR_DATA_DIR: e2eDataDir,
+            ...(process.env.BAJKOKREATOR_OPS_TOKEN
+              ? { BAJKOKREATOR_OPS_TOKEN: process.env.BAJKOKREATOR_OPS_TOKEN }
+              : {
+                  BAJKOKREATOR_ALLOW_UNAUTHENTICATED_OPS:
+                    process.env.BAJKOKREATOR_ALLOW_UNAUTHENTICATED_OPS ?? 'true',
+                }),
           },
         },
       }),

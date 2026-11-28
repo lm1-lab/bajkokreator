@@ -86,7 +86,9 @@ export class EnvBearerTokenGuard implements OperatorAuthGuard {
   ): Promise<OperatorIdentity> {
     const sourceEnv = this.env ?? process.env;
     const configuredToken = sourceEnv.BAJKOKREATOR_OPS_TOKEN?.trim() ?? '';
+    const isProduction = sourceEnv.NODE_ENV?.trim().toLowerCase() === 'production';
     const requireAuth =
+      isProduction ||
       sourceEnv.BAJKOKREATOR_REQUIRE_OPS_AUTH?.trim().toLowerCase() === 'true';
     const allowUnauthenticated =
       sourceEnv.BAJKOKREATOR_ALLOW_UNAUTHENTICATED_OPS?.trim().toLowerCase() === 'true';
@@ -121,7 +123,7 @@ export class EnvBearerTokenGuard implements OperatorAuthGuard {
 
     if (requireAuth && !allowUnauthenticated) {
       throw new UnauthorizedError(
-        'Wymagana autoryzacja operatora (BAJKOKREATOR_REQUIRE_OPS_AUTH=true), ale nie skonfigurowano BAJKOKREATOR_OPS_TOKEN.',
+        'Wymagana autoryzacja operatora (tryb produkcyjny lub BAJKOKREATOR_REQUIRE_OPS_AUTH=true), ale nie skonfigurowano BAJKOKREATOR_OPS_TOKEN.',
         'OPERATOR_AUTH_NOT_CONFIGURED',
         401,
       );

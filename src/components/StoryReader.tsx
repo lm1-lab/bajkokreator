@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   copyTextToClipboard,
   downloadStoryPdfBinary,
@@ -139,6 +139,7 @@ export function StoryReader({
     id: string;
     orderNumber: string;
   } | null>(null);
+  const orderIdempotencyRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const sortedPages = useMemo(
     () => [...story.pages].sort((a, b) => a.pageNumber - b.pageNumber),
@@ -486,28 +487,44 @@ export function StoryReader({
 
   async function handleCreateOrderDraft(event: React.FormEvent) {
     event.preventDefault();
+    if (isSubmittingOrder) return;
     setIsSubmittingOrder(true);
     setErrorMessage(null);
     setStatusMessage(null);
     try {
+      const payload = {
+        storyId: story.id,
+        bookFormat: story.bookFormat,
+        quantity: 1,
+        shippingAddress: {
+          recipientName: orderRecipientName.trim(),
+          line1: orderLine1.trim(),
+          postalCode: orderPostalCode.trim(),
+          city: orderCity.trim(),
+          countryCode: 'PL',
+          email: orderEmail.trim(),
+          ...(orderPhone.trim() ? { phone: orderPhone.trim() } : {}),
+        },
+      };
+      const fingerprint = JSON.stringify(payload);
+      if (orderIdempotencyRef.current?.fingerprint !== fingerprint) {
+        const randomPart =
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        orderIdempotencyRef.current = {
+          fingerprint,
+          key: `ui-${story.id}-${randomPart}`,
+        };
+      }
+
       const res = await fetch('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          storyId: story.id,
-          bookFormat: story.bookFormat,
-          quantity: 1,
-          totalMinorUnits: 12900,
-          shippingAddress: {
-            recipientName: orderRecipientName.trim(),
-            line1: orderLine1.trim(),
-            postalCode: orderPostalCode.trim(),
-            city: orderCity.trim(),
-            countryCode: 'PL',
-            email: orderEmail.trim(),
-            ...(orderPhone.trim() ? { phone: orderPhone.trim() } : {}),
-          },
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': orderIdempotencyRef.current.key,
+        },
+        body: JSON.stringify(payload),
       });
       const data = (await res.json()) as {
         order?: { id: string; orderNumber: string };

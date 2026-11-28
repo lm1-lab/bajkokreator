@@ -7,9 +7,14 @@ import {
   jsonResponse,
 } from '@/lib/api-helpers';
 import { getDomainEventBus } from '@/lib/ops/event-bus';
-import { OrderActorSchema, transitionOrder } from '@/lib/orders/lifecycle';
+import {
+  OrderActorSchema,
+  resolveAuthorizedOrderActor,
+  transitionOrder,
+} from '@/lib/orders/lifecycle';
 import { getOrderByIdOrNumber, getOrderRepository } from '@/lib/orders/repository';
 import { requireOperatorAuth } from '@/lib/security/operator-guard';
+import { parseOptionalJsonBodyWithLimit } from '@/lib/security/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +24,7 @@ interface RouteContext {
 }
 
 const CancelBodySchema = z.object({
-  actor: OrderActorSchema.default({ kind: 'admin', id: 'operator' }),
+  actor: OrderActorSchema.optional(),
   reason: z.string().trim().max(400).optional(),
   expectedVersion: z.number().int().min(1).optional(),
 });
@@ -30,7 +35,7 @@ export async function POST(
 ): Promise<NextResponse> {
   const requestId = getOrCreateRequestId(request);
   try {
-    await requireOperatorAuth(request, ['admin', 'agent']);
+    const identity = await requireOperatorAuth(request, ['admin', 'agent']);
     const { id } = await context.params;
     const order = await getOrderByIdOrNumber(id);
     if (!order) {
@@ -42,16 +47,13 @@ export async function POST(
       });
     }
 
-    let rawBody: unknown = {};
-    const text = await request.text();
-    if (text.trim().length > 0) {
-      rawBody = JSON.parse(text);
-    }
+    const rawBody = (await parseOptionalJsonBodyWithLimit(request, 32 * 1024)) ?? {};
     const body = CancelBodySchema.parse(rawBody);
+    const effectiveActor = resolveAuthorizedOrderActor(identity, body.actor);
 
     const prevStatus = order.status;
     const transitioned = transitionOrder(order, 'cancelled', {
-      actor: body.actor,
+      actor: effectiveActor,
       reason: body.reason ?? 'Anulowanie zamówienia przed opłaceniem',
       ...(body.expectedVersion !== undefined ? { expectedVersion: body.expectedVersion } : {}),
     });

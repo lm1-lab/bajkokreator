@@ -109,3 +109,34 @@ export function setIdempotencyStore(store: IdempotencyStore): void {
 export function resetIdempotencyStore(): void {
   activeIdempotencyStore = defaultIdempotencyStore;
 }
+
+const idempotencyLocks = new Map<string, Promise<void>>();
+
+/**
+ * Serializes concurrent requests sharing the same `(scope, key)` within a
+ * process so duplicate bursts cannot race past the idempotency check.
+ */
+export async function withIdempotencyLock<T>(
+  scope: string,
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const lockKey = `${scope}:${key}`;
+  const prev = idempotencyLocks.get(lockKey) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = prev.catch(() => undefined).then(() => current);
+  idempotencyLocks.set(lockKey, tail);
+
+  await prev.catch(() => undefined);
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (idempotencyLocks.get(lockKey) === tail) {
+      idempotencyLocks.delete(lockKey);
+    }
+  }
+}

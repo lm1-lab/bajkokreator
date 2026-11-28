@@ -6,6 +6,11 @@ import {
   jsonResponse,
 } from '@/lib/api-helpers';
 import { requireOperatorAuth } from '@/lib/security/operator-guard';
+import {
+  ROUTE_RATE_LIMITS,
+  enforceRateLimit,
+  parseJsonBodyWithLimit,
+} from '@/lib/security/rate-limit';
 import { evaluateSupportPolicy } from '@/lib/support/guardrails';
 import { searchKnowledgeBaseWithScores } from '@/lib/support/knowledge-base';
 import {
@@ -43,7 +48,8 @@ export async function GET(request: Request): Promise<NextResponse> {
 export async function POST(request: Request): Promise<NextResponse> {
   const requestId = getOrCreateRequestId(request);
   try {
-    const rawBody: unknown = await request.json();
+    await enforceRateLimit(request, ROUTE_RATE_LIMITS.supportInquiries);
+    const rawBody = await parseJsonBodyWithLimit(request, 64 * 1024);
     const body = CreateInquiryBodySchema.parse(rawBody);
 
     const kbMatches = searchKnowledgeBaseWithScores({
